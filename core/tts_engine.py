@@ -12,7 +12,7 @@ class SpeechEngine(ABC):
 class TextToSpeech(SpeechEngine):
 
     def __init__(self):
-        self.__rate = 200
+        self.__rate = 120
         self.__voice_id = None
 
         temp = pyttsx3.init()

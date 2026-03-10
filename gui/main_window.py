@@ -8,11 +8,12 @@ from PyQt6.QtWidgets import (
     QLabel
 )
 import sys
+from core import tts_engine
 class MainWindow(QMainWindow):
     def __init__(self, speech_service = None):
         super().__init__()
 
-        self.speech_service = speech_service
+        self.speech_service = tts_engine.TextToSpeech()
 
         self.setWindowTitle("VeaJa")
         self.setFixedSize(400,533)
