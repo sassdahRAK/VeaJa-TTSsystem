@@ -4,13 +4,13 @@ from abc import ABC, abstractmethod
 
 
 class SpeechEngine(ABC):
-
+    """Role model class -> SpeakEnglish | SpeakKhmer"""
     @abstractmethod
     def speak(self, text):
         pass
 
 class TextToSpeech(SpeechEngine):
-
+    """Speak English only"""
     def __init__(self):
         self.__rate = 120
         self.__voice_id = None
@@ -39,7 +39,7 @@ class TextToSpeech(SpeechEngine):
         except Exception as e:
             print(f"Error during speech: {e}")
 
-
+"""Test"""
 def main():
     try:
         speaker = TextToSpeech()
