@@ -49,6 +49,7 @@ class AppController(QObject):
 
         # Overlay user actions
         self._overlay.read_requested.connect(self._speak)
+        self._overlay.stop_requested.connect(self._stop_speaking)
         self._overlay.hide_requested.connect(self._overlay.hide_overlay)
         self._overlay.settings_requested.connect(self._wm.show_main)
 
@@ -99,6 +100,7 @@ class AppController(QObject):
             return
         self._tts.speak(
             text,
+            on_preparing=self._on_preparing_speech,
             on_start=self._on_speaking_started,
             on_finish=self._on_speaking_finished,
             on_error=self._on_speaking_error,
@@ -108,12 +110,21 @@ class AppController(QObject):
         self._tts.stop()
         self._on_speaking_finished()
 
+    def _on_preparing_speech(self):
+        """Synthesis has started — show processing state immediately."""
+        self._overlay.set_processing(True)
+        self._main_window.set_processing(True)
+
     def _on_speaking_started(self):
+        """First sentence is now playing — switch to speaking state."""
+        self._overlay.set_processing(False)
         self._overlay.set_speaking(True)
         self._main_window.set_speaking(True)
 
     def _on_speaking_finished(self):
+        self._overlay.set_processing(False)
         self._overlay.set_speaking(False)
+        self._main_window.set_processing(False)
         self._main_window.set_speaking(False)
 
     def _on_speaking_error(self, msg: str):

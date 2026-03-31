@@ -202,6 +202,7 @@ class OverlayWidget(QWidget):
     """
 
     read_requested     = pyqtSignal(str)
+    stop_requested     = pyqtSignal()        # emitted when user clicks to stop
     hide_requested     = pyqtSignal()
     settings_requested = pyqtSignal()
     overlay_shown      = pyqtSignal()
@@ -213,14 +214,17 @@ class OverlayWidget(QWidget):
         # State
         self._text: str = ""
         self._speaking: bool = False
+        self._processing: bool = False    # True while synthesising audio
         self._press_pos: QPoint | None = None
         self._dragging: bool = False
         self._expanded: bool = False
+        self._dot_count: int = 0          # animated dots counter
 
         self._setup_window()
         self._build_ui()
         self._build_animations()
         self._build_keep_front_timer()
+        self._build_dot_timer()
         self._position_default()
 
     # ------------------------------------------------------------------ #
@@ -323,6 +327,17 @@ class OverlayWidget(QWidget):
     # Keep-on-top timer
     # ------------------------------------------------------------------ #
 
+    def _build_dot_timer(self):
+        """Animates '.' → '..' → '...' while processing."""
+        self._dot_timer = QTimer(self)
+        self._dot_timer.setInterval(450)
+        self._dot_timer.timeout.connect(self._tick_dots)
+
+    def _tick_dots(self):
+        self._dot_count = (self._dot_count + 1) % 4
+        dots = "." * self._dot_count
+        self._title_label.setText(f"Processing{dots}")
+
     def _build_keep_front_timer(self):
         """
         Periodically re-assert the window level while the overlay is visible.
@@ -384,9 +399,27 @@ class OverlayWidget(QWidget):
             self._front_timer.start()
         self.overlay_shown.emit()
 
+    def set_processing(self, processing: bool):
+        """Show animated 'Processing…' dots while synthesis is running."""
+        self._processing = processing
+        if processing:
+            self._dot_count = 0
+            self._dot_timer.start()
+            self._title_label.setText("Processing")
+            self._expand()          # keep pill open so user sees the state
+        else:
+            self._dot_timer.stop()
+        self.update()
+
     def set_speaking(self, speaking: bool):
         self._speaking = speaking
-        self._title_label.setText("Speaking…" if speaking else "Tap to read")
+        self._processing = False
+        self._dot_timer.stop()
+        if speaking:
+            self._title_label.setText("Speaking…  ■ click to stop")
+            self._expand()
+        else:
+            self._title_label.setText("Tap to read" if self._text else "Veaja is ready")
         self.update()
 
     def update_theme(self, dark: bool):
@@ -438,8 +471,13 @@ class OverlayWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if not self._dragging and self._text:
-                self.read_requested.emit(self._text)
+            if not self._dragging:
+                if self._speaking or self._processing:
+                    # While active: click = stop
+                    self.stop_requested.emit()
+                elif self._text:
+                    # While idle: click = read
+                    self.read_requested.emit(self._text)
             self._press_pos = None
             self._dragging = False
 

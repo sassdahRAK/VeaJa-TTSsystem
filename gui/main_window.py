@@ -266,6 +266,16 @@ class MainWindow(QMainWindow):
         self._text_edit.setPlainText(text)
         self._add_history(text)
 
+    def set_processing(self, processing: bool):
+        """Called while edge-tts is synthesising (before audio starts)."""
+        if processing:
+            self._read_btn.setEnabled(False)
+            self._read_btn.setText("⏳ Processing…")
+            self._stop_btn.setEnabled(True)   # allow cancel during synthesis
+        else:
+            # Speaking state will follow immediately; only reset if fully idle
+            pass
+
     def set_speaking(self, speaking: bool):
         self._speaking = speaking
         self._read_btn.setEnabled(not speaking)
@@ -332,7 +342,7 @@ class MainWindow(QMainWindow):
         qss_file = "dark.qss" if self._dark else "light.qss"
         path = os.path.join(STYLES, qss_file)
         if os.path.exists(path):
-            with open(path, "r") as f:
+            with open(path, encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
 
     # ------------------------------------------------------------------ #
