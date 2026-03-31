@@ -17,8 +17,7 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QSpacerItem
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QFont, QPalette, QColor
-from PyQt6.QtSvgWidgets import QSvgWidget
+from PyQt6.QtGui import QIcon, QFont, QPalette, QColor, QPixmap
 
 
 ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
@@ -79,14 +78,14 @@ class MainWindow(QMainWindow):
     def _header_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
 
-        # Logo (small)
-        svg_path = os.path.join(
-            ASSETS, "logo_dark.svg" if self._dark else "logo_light.svg"
-        )
-        if os.path.exists(svg_path):
-            logo = QSvgWidget(svg_path)
-            logo.setFixedSize(38, 38)
-            row.addWidget(logo)
+        # Logo (small) — QLabel with QPixmap, much lighter than QSvgWidget
+        # logo_dark.png = dark face on white bg → light mode
+        # logo_light.png = white face on dark bg → dark mode
+        self._header_logo = QLabel()
+        self._header_logo.setFixedSize(38, 38)
+        self._header_logo.setScaledContents(False)
+        self._reload_header_logo()
+        row.addWidget(self._header_logo)
 
         title = QLabel("Veaja")
         title.setObjectName("appTitle")
@@ -104,6 +103,17 @@ class MainWindow(QMainWindow):
         row.addWidget(self._theme_btn)
 
         return row
+
+    def _reload_header_logo(self):
+        name = "logo_light.png" if self._dark else "logo_dark.png"
+        path = os.path.join(ASSETS, name)
+        if os.path.exists(path):
+            px = QPixmap(path).scaled(
+                38, 38,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._header_logo.setPixmap(px)
 
     # ─── Text input ──────────────────────────────────────────────────────
 
@@ -310,6 +320,7 @@ class MainWindow(QMainWindow):
     def _toggle_theme(self):
         self._dark = not self._dark
         self._theme_btn.setText("☀" if self._dark else "☾")
+        self._reload_header_logo()
         self._apply_theme()
         self.theme_changed.emit(self._dark)
 

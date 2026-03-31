@@ -14,6 +14,7 @@ from core.selection_monitor import SelectionMonitor
 from gui.main_window import MainWindow
 from gui.overlay_widget import OverlayWidget
 from gui.tray_icon import TrayIcon
+from services.window_manager import WindowManager
 
 
 class AppController(QObject):
@@ -27,6 +28,9 @@ class AppController(QObject):
         self._overlay       = OverlayWidget()
         self._tray          = TrayIcon(dark_mode=self._is_dark_mode())
         self._monitor       = SelectionMonitor()
+
+        # WindowManager — controls overlay ↔ main-window visibility rules
+        self._wm = WindowManager(self._main_window, self._overlay, parent=self)
 
         self._wire_signals()
         self._populate_voices()
@@ -46,7 +50,7 @@ class AppController(QObject):
         # Overlay user actions
         self._overlay.read_requested.connect(self._speak)
         self._overlay.hide_requested.connect(self._overlay.hide_overlay)
-        self._overlay.settings_requested.connect(self._show_main_window)
+        self._overlay.settings_requested.connect(self._wm.show_main)
 
         # Main window user actions
         self._main_window.read_requested.connect(self._speak)
@@ -54,8 +58,8 @@ class AppController(QObject):
         self._main_window.quit_requested.connect(self._quit)
         self._main_window.theme_changed.connect(self._on_theme_changed)
 
-        # Tray
-        self._tray.show_window_requested.connect(self._show_main_window)
+        # Tray → always show main via WindowManager
+        self._tray.show_window_requested.connect(self._wm.show_main)
         self._tray.quit_requested.connect(self._quit)
 
     def _populate_voices(self):
@@ -63,11 +67,19 @@ class AppController(QObject):
         self._main_window.populate_voices(voices)
 
     # ------------------------------------------------------------------ #
-    # Entry point (called after splash closes)
+    # Public accessors (used by main.py)
+    # ------------------------------------------------------------------ #
+
+    @property
+    def window_manager(self) -> "WindowManager":
+        return self._wm
+
+    # ------------------------------------------------------------------ #
+    # Entry point (called by main.py after splash closes)
     # ------------------------------------------------------------------ #
 
     def start(self):
-        self._show_main_window()
+        self._wm.show_main()
 
     # ------------------------------------------------------------------ #
     # Text ready (from clipboard / selection)
@@ -119,6 +131,10 @@ class AppController(QObject):
 
     def _on_theme_changed(self, dark: bool):
         self._tray.update_icon(dark)
+        self._overlay.update_theme(dark)
+
+    def _show_main_window(self):
+        self._wm.show_main()
 
     # ------------------------------------------------------------------ #
     # Quit

@@ -6,9 +6,8 @@ with "Veaja" label below. Auto-closes after ~2.5 s then emits `finished`.
 
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtGui import QPalette, QColor, QPixmap
 
 
 ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
@@ -51,18 +50,25 @@ class SplashScreen(QWidget):
         layout.setSpacing(24)
         layout.setContentsMargins(60, 60, 60, 60)
 
-        # SVG logo
-        svg_path = os.path.join(ASSETS, "logo_dark.svg" if self._dark else "logo_light.svg")
-        if os.path.exists(svg_path):
-            self.logo = QSvgWidget(svg_path)
-            self.logo.setFixedSize(220, 220)
+        # PNG logo — much lighter than SVG
+        # logo_dark.png = dark face on white bg  → light mode splash (white bg)
+        # logo_light.png = white face on dark bg → dark mode splash (black bg)
+        png_path = os.path.join(ASSETS, "logo_light.png" if self._dark else "logo_dark.png")
+        self.logo = QLabel()
+        self.logo.setFixedSize(220, 220)
+        self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if os.path.exists(png_path):
+            px = QPixmap(png_path).scaled(
+                220, 220,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.logo.setPixmap(px)
         else:
-            # Fallback text logo
-            self.logo = QLabel("Veaja")
+            self.logo.setText("Veaja")
             self.logo.setStyleSheet(
                 "font-size: 72px; font-weight: bold; color: #E53935;"
             )
-            self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(self.logo, alignment=Qt.AlignmentFlag.AlignCenter)
 

@@ -21,8 +21,8 @@ def _make_tray_icon(dark_mode: bool) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    # Try SVG
-    svg_name = "logo_dark.svg" if dark_mode else "logo_light.svg"
+    # Try SVG  (dark mode → white-face logo; light mode → dark-face logo)
+    svg_name = "logo_light.svg" if dark_mode else "logo_dark.svg"
     svg_path = os.path.join(ASSETS, svg_name)
     rendered = False
     if os.path.exists(svg_path):
