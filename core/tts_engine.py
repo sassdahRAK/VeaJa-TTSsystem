@@ -1,16 +1,18 @@
 """
 TTS engine — two backends:
-  1. EdgeTTSWorker  (default)  — Microsoft neural voices via edge-tts.
-                                 Sounds very human. Requires internet.
-                                 Streams sentence-by-sentence so first audio
-                                 starts within ~1-2 s even for very long text.
-  2. Pyttsx3Worker (fallback) — SAPI5 system voices (offline).
+  1. EdgeTTSWorker  — Microsoft neural voices (online, human-like).
+                      Streams sentence-by-sentence → first audio in ~1 s.
+                      Supports pause / resume via pygame.
+                      Saves combined reading session as a single MP3 file.
+  2. Pyttsx3Worker  — SAPI5 system voices (offline fallback, no pause support).
 
-Signals emitted (in order):
-  preparing_speech  — synthesis of first sentence has started (show "Processing…")
-  started_speaking  — first sentence is actually playing  (show "Speaking…")
-  finished_speaking — all done or stopped
-  error_occurred    — something went wrong
+Signal lifecycle (in order):
+  preparing_speech  → synthesis started          → show "Processing…"
+  started_speaking  → first sentence playing     → show "Speaking…"
+  paused_speaking   → audio paused               → show "Paused"
+  resumed_speaking  → audio resumed              → show "Speaking…"
+  finished_speaking → all done / stopped
+  error_occurred    → something went wrong
 """
 
 import asyncio
@@ -31,7 +33,7 @@ try:
 except Exception:
     _PYGAME_OK = False
 
-# ── Built-in list of neural voices exposed in the UI ─────────────────────────
+# ── Neural voice catalogue ────────────────────────────────────────────────────
 EDGE_TTS_VOICES = [
     {"id": "en-US-AriaNeural",    "name": "Aria  — US Female  (Neural)"},
     {"id": "en-US-JennyNeural",   "name": "Jenny — US Female  (Neural)"},
@@ -51,7 +53,7 @@ EDGE_TTS_VOICES = [
 def _split_sentences(text: str) -> list[str]:
     """
     Split text into sentence-sized chunks.
-    Short fragments (< 40 chars) are merged with the next sentence
+    Fragments shorter than 40 chars are merged with the next sentence
     to avoid too many tiny synthesis requests.
     """
     parts = re.split(r'(?<=[.!?…])\s+', text.strip())
@@ -73,102 +75,130 @@ def _split_sentences(text: str) -> list[str]:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Backend 1 — Edge-TTS + pygame  (neural, online, streamed sentence-by-sentence)
+# Backend 1 — Edge-TTS + pygame  (neural, online)
 # ═════════════════════════════════════════════════════════════════════════════
 
 class EdgeTTSWorker(QThread):
     """
-    Streams long text as sentences so audio begins within ~1 s.
+    Sentence-streaming TTS worker with pause/resume and MP3 session save.
 
     Timeline:
-      click → preparing_speech → [synthesise s1] → started_speaking
-           → play s1 / synthesise s2 in parallel
-           → play s2 / synthesise s3 in parallel  …
-           → finished_speaking
+      preparing_speech → [synthesise s1] → started_speaking
+        → play s1 / synthesise s2 in parallel
+        → play s2 / synthesise s3 in parallel …
+        → finished_speaking
+        → (if not stopped) combine all sentence MP3s → session_path
     """
 
-    preparing_speech  = pyqtSignal()   # synthesis started — show "Processing…"
-    started_speaking  = pyqtSignal()   # first audio playing — show "Speaking…"
+    preparing_speech  = pyqtSignal()
+    started_speaking  = pyqtSignal()
+    paused_speaking   = pyqtSignal()
+    resumed_speaking  = pyqtSignal()
     finished_speaking = pyqtSignal()
     error_occurred    = pyqtSignal(str)
 
     def __init__(self, text: str, voice: str = "en-US-AriaNeural",
-                 rate: str = "+0%", volume: float = 1.0):
+                 rate: str = "+0%", volume: float = 1.0,
+                 session_path: str | None = None):
         super().__init__()
-        self._text       = text
-        self._voice      = voice
-        self._rate       = rate
-        self._volume     = volume
-        self._stop_event = threading.Event()
+        self._text         = text
+        self._voice        = voice
+        self._rate         = rate
+        self._volume       = volume
+        self._session_path = session_path    # where to save combined MP3
+
+        self._stop_event  = threading.Event()
+        self._pause_event = threading.Event()   # set = paused
+        self._sentence_mp3s: list[str] = []     # ordered sentence files for combine
 
     # ── Main thread body ──────────────────────────────────────────────────────
 
     def run(self):
-        sentences = _split_sentences(self._text)
+        sentences   = _split_sentences(self._text)
         tmp_files: list[str] = []
 
         try:
             self.preparing_speech.emit()
 
-            # Pre-fetch: synthesise sentence[i+1] while sentence[i] is playing.
             with ThreadPoolExecutor(max_workers=1) as pool:
-                # Kick off synthesis of the first sentence immediately.
                 next_future: Future = pool.submit(self._synthesise, sentences[0])
 
                 for i, _sentence in enumerate(sentences):
                     if self._stop_event.is_set():
                         break
 
-                    # Wait for current sentence's audio file.
                     tmp_path = next_future.result()
 
-                    # While we waited, kick off the next sentence in parallel.
+                    # Pre-fetch next sentence while this one plays
                     if i + 1 < len(sentences) and not self._stop_event.is_set():
-                        next_future = pool.submit(
-                            self._synthesise, sentences[i + 1]
-                        )
+                        next_future = pool.submit(self._synthesise, sentences[i + 1])
 
                     if tmp_path is None or self._stop_event.is_set():
                         break
 
                     tmp_files.append(tmp_path)
+                    self._sentence_mp3s.append(tmp_path)
 
-                    # First sentence ready → audio is about to start.
                     if i == 0:
                         self.started_speaking.emit()
 
-                    # Play this sentence.
                     pygame.mixer.music.load(tmp_path)
                     pygame.mixer.music.set_volume(self._volume)
                     pygame.mixer.music.play()
 
+                    # ── Playback loop — handles stop and pause ──────────────
                     while pygame.mixer.music.get_busy():
                         if self._stop_event.is_set():
                             pygame.mixer.music.stop()
                             break
+
+                        if self._pause_event.is_set():
+                            pygame.mixer.music.pause()
+                            self.paused_speaking.emit()
+                            # Wait until unpaused or stopped
+                            while self._pause_event.is_set():
+                                if self._stop_event.is_set():
+                                    pygame.mixer.music.stop()
+                                    break
+                                self.msleep(40)
+                            else:
+                                # Unpaused cleanly → resume
+                                pygame.mixer.music.unpause()
+                                self.resumed_speaking.emit()
+                            if self._stop_event.is_set():
+                                break
+
                         self.msleep(40)
+                    # ────────────────────────────────────────────────────────
 
                     try:
                         pygame.mixer.music.unload()
                     except Exception:
                         pass
 
+                    if self._stop_event.is_set():
+                        break
+
         except Exception as exc:
             self.error_occurred.emit(str(exc))
         finally:
-            # Clean up all temp files.
+            # Save combined session MP3 (even partial sessions are useful)
+            if self._session_path and self._sentence_mp3s:
+                self._combine_mp3s(self._sentence_mp3s, self._session_path)
+
+            # Clean up sentence temp files
             for f in tmp_files:
                 try:
                     if os.path.exists(f):
                         os.remove(f)
                 except Exception:
                     pass
+
             self.finished_speaking.emit()
 
-    # ── Per-sentence synthesis (runs in thread-pool, NOT the QThread) ─────────
+    # ── Per-sentence synthesis (pool thread) ──────────────────────────────────
 
     def _synthesise(self, sentence: str) -> str | None:
-        """Synthesise one sentence to a temp MP3. Returns path or None."""
         try:
             import edge_tts
         except ImportError:
@@ -181,8 +211,7 @@ class EdgeTTSWorker(QThread):
         tmp.close()
 
         async def _gen():
-            communicate = edge_tts.Communicate(sentence, self._voice,
-                                               rate=self._rate)
+            communicate = edge_tts.Communicate(sentence, self._voice, rate=self._rate)
             await communicate.save(tmp.name)
 
         try:
@@ -196,10 +225,38 @@ class EdgeTTSWorker(QThread):
                 pass
             return None
 
-    # ── Stop (called from main thread) ────────────────────────────────────────
+    # ── Combine sentence MP3s into one session file ───────────────────────────
+
+    def _combine_mp3s(self, sources: list[str], dest: str):
+        """
+        Concatenate CBR MP3 segments by binary append.
+        edge-tts always outputs CBR MP3, so frame boundaries are clean.
+        No external tools (ffmpeg / pydub) required.
+        """
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as out:
+                for src in sources:
+                    if os.path.exists(src):
+                        with open(src, "rb") as f:
+                            out.write(f.read())
+        except Exception as exc:
+            self.error_occurred.emit(f"Audio save error: {exc}")
+
+    # ── Control (called from main thread) ─────────────────────────────────────
+
+    def pause(self):
+        """Signal the playback loop to pause at the current position."""
+        self._pause_event.set()
+
+    def resume(self):
+        """Signal the playback loop to resume from the paused position."""
+        self._pause_event.clear()
 
     def stop(self):
+        """Terminate playback immediately."""
         self._stop_event.set()
+        self._pause_event.clear()   # unblock the inner pause wait
         try:
             pygame.mixer.music.stop()
         except Exception:
@@ -208,14 +265,16 @@ class EdgeTTSWorker(QThread):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Backend 2 — pyttsx3 / SAPI5  (offline fallback)
+# Backend 2 — pyttsx3 / SAPI5  (offline fallback, no pause support)
 # ═════════════════════════════════════════════════════════════════════════════
 
 class Pyttsx3Worker(QThread):
-    """Offline TTS using the system SAPI5 / espeak engine."""
+    """Offline TTS via system SAPI5 / espeak. Pause is not supported."""
 
     preparing_speech  = pyqtSignal()
     started_speaking  = pyqtSignal()
+    paused_speaking   = pyqtSignal()   # never emitted — here for interface parity
+    resumed_speaking  = pyqtSignal()   # never emitted
     finished_speaking = pyqtSignal()
     error_occurred    = pyqtSignal(str)
 
@@ -251,6 +310,12 @@ class Pyttsx3Worker(QThread):
             self._engine = None
             self.finished_speaking.emit()
 
+    def pause(self):
+        pass   # SAPI5 has no reliable pause API
+
+    def resume(self):
+        pass
+
     def stop(self):
         try:
             if self._engine:
@@ -262,24 +327,23 @@ class Pyttsx3Worker(QThread):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# High-level TTSEngine  (used by AppController)
+# High-level TTSEngine
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TTSEngine:
     """
     Manages one active worker at a time.
-
-    Prefers EdgeTTS (neural, human-like) when edge-tts + pygame are available.
-    Falls back to pyttsx3 automatically.
+    Prefers EdgeTTS (neural, human-like). Falls back to pyttsx3.
     """
 
     def __init__(self):
-        self._worker = None
+        self._worker: EdgeTTSWorker | Pyttsx3Worker | None = None
 
         # Edge-TTS settings
-        self._edge_voice = "en-US-AriaNeural"
-        self._edge_rate  = "+0%"
-        self._volume     = 1.0
+        self._edge_voice    = "en-US-AriaNeural"
+        self._edge_rate     = "+0%"
+        self._volume        = 1.0
+        self._force_offline = False   # user can override to force pyttsx3
 
         # pyttsx3 fallback settings
         self._rate        = 175
@@ -287,8 +351,7 @@ class TTSEngine:
         self._pyttsx3_voices: list[dict] = []
 
         self._edge_available = self._check_edge_tts()
-        if not self._edge_available:
-            self._load_pyttsx3_voices()
+        self._load_pyttsx3_voices()   # always load so offline mode has voices
 
     # ── Backend detection ─────────────────────────────────────────────────────
 
@@ -303,50 +366,58 @@ class TTSEngine:
     def is_edge_available(self) -> bool:
         return self._edge_available
 
+    def _use_edge(self) -> bool:
+        """True when EdgeTTS is available AND not forced offline."""
+        return self._edge_available and not self._force_offline
+
+    def set_forced_offline(self, offline: bool):
+        """Force pyttsx3 even if edge-tts is installed (user preference)."""
+        self._force_offline = offline
+
+    def supports_pause(self) -> bool:
+        """True only when EdgeTTS backend is active."""
+        return self._use_edge()
+
     # ── Voice discovery ───────────────────────────────────────────────────────
 
     def _load_pyttsx3_voices(self):
         try:
             engine = pyttsx3.init()
             raw = engine.getProperty("voices")
-            self._pyttsx3_voices = [
-                {"id": v.id, "name": v.name}
-                for v in raw
-            ]
+            self._pyttsx3_voices = [{"id": v.id, "name": v.name} for v in raw]
             engine.stop()
         except Exception:
             self._pyttsx3_voices = []
 
     def get_voices(self) -> list[dict]:
-        return EDGE_TTS_VOICES if self._edge_available else self._pyttsx3_voices
+        return EDGE_TTS_VOICES if self._use_edge() else self._pyttsx3_voices
 
     # ── Playback ──────────────────────────────────────────────────────────────
 
     def speak(self, text: str,
               on_preparing=None, on_start=None,
-              on_finish=None, on_error=None):
+              on_finish=None, on_error=None,
+              on_paused=None, on_resumed=None,
+              session_path: str | None = None):
         self.stop()
 
-        if self._edge_available:
+        if self._use_edge():
             worker = EdgeTTSWorker(
                 text,
                 voice=self._edge_voice,
                 rate=self._edge_rate,
                 volume=self._volume,
+                session_path=session_path,
             )
         else:
-            worker = Pyttsx3Worker(
-                text, self._rate, self._volume, self._voice_id
-            )
+            worker = Pyttsx3Worker(text, self._rate, self._volume, self._voice_id)
 
-        if on_preparing:
-            worker.preparing_speech.connect(on_preparing)
-        if on_start:
-            worker.started_speaking.connect(on_start)
-        if on_finish:
-            worker.finished_speaking.connect(on_finish)
-        if on_error:
-            worker.error_occurred.connect(on_error)
+        if on_preparing: worker.preparing_speech.connect(on_preparing)
+        if on_start:     worker.started_speaking.connect(on_start)
+        if on_finish:    worker.finished_speaking.connect(on_finish)
+        if on_error:     worker.error_occurred.connect(on_error)
+        if on_paused:    worker.paused_speaking.connect(on_paused)
+        if on_resumed:   worker.resumed_speaking.connect(on_resumed)
 
         self._worker = worker
         worker.start()
@@ -357,8 +428,21 @@ class TTSEngine:
             self._worker.stop()
         self._worker = None
 
+    def pause(self):
+        if self._worker and self._worker.isRunning():
+            self._worker.pause()
+
+    def resume(self):
+        if self._worker and self._worker.isRunning():
+            self._worker.resume()
+
     def is_speaking(self) -> bool:
         return bool(self._worker and self._worker.isRunning())
+
+    def is_paused(self) -> bool:
+        if isinstance(self._worker, EdgeTTSWorker):
+            return self._worker._pause_event.is_set()
+        return False
 
     # ── Settings ──────────────────────────────────────────────────────────────
 

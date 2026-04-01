@@ -83,8 +83,8 @@ def main() -> None:
     #
     wm: WindowManager = controller.window_manager
 
-    # ── 4. Wire splash finish → show main window via WindowManager ───────
-    splash.finished.connect(wm.show_main)
+    # ── 4. Wire splash finish → start app (loads profile, shows terms if new) ──
+    splash.finished.connect(controller.start)
     splash.start_timer(delay_ms=2500)
 
     sys.exit(app.exec())

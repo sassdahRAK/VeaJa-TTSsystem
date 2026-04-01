@@ -7,9 +7,14 @@ Features:
   • Dark / light theme toggle (syncs with system)
   • History list of last 20 items
   • Minimise to tray
+  • Profile avatar + name in header (editable via ProfileDialog)
+  • Terms & Privacy button
+  • Read button turns RED while speaking, ORANGE while paused
 """
 
 import os
+from enum import Enum, auto
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QSlider,
@@ -17,11 +22,21 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QSpacerItem
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QFont, QPalette, QColor, QPixmap
-
+# from PyQt6.QtGui import QIcon, QFont, QPalette, QColor, QPixmap, QPainter, QPainterPath, QRectF
+# AFTER (fixed) — split into two imports
+from PyQt6.QtGui import QIcon, QFont, QPalette, QColor, QPixmap, QPainter, QPainterPath
+from PyQt6.QtCore import QRectF
 
 ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
 STYLES = os.path.join(os.path.dirname(__file__), "..", "styles")
+
+
+# ── Read state enum (shared with AppController via import) ────────────────────
+class ReadState(Enum):
+    IDLE       = auto()
+    PROCESSING = auto()
+    SPEAKING   = auto()
+    PAUSED     = auto()
 
 
 def _is_dark_mode() -> bool:
@@ -32,23 +47,50 @@ def _is_dark_mode() -> bool:
     return app.palette().color(QPalette.ColorRole.Window).lightness() < 128
 
 
+def _make_round_pixmap(path: str, size: int) -> QPixmap | None:
+    """Load an image and clip it to a circle of the given size."""
+    raw = QPixmap(path)
+    if raw.isNull():
+        return None
+    raw = raw.scaled(size, size,
+                     Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                     Qt.TransformationMode.SmoothTransformation)
+    result = QPixmap(size, size)
+    result.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(result)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    clip = QPainterPath()
+    clip.addEllipse(QRectF(0, 0, size, size))
+    painter.setClipPath(clip)
+    x = (raw.width()  - size) // 2
+    y = (raw.height() - size) // 2
+    painter.drawPixmap(-x, -y, raw)
+    painter.end()
+    return result
+
+
 class MainWindow(QMainWindow):
     # Signals to AppController
-    read_requested  = pyqtSignal(str)
-    stop_requested  = pyqtSignal()
-    quit_requested  = pyqtSignal()
-    theme_changed   = pyqtSignal(bool)   # True = dark
+    read_requested    = pyqtSignal(str)
+    pause_requested   = pyqtSignal()
+    resume_requested  = pyqtSignal()
+    stop_requested    = pyqtSignal()
+    quit_requested    = pyqtSignal()
+    theme_changed     = pyqtSignal(bool)   # True = dark
+    terms_requested   = pyqtSignal()
+    profile_requested = pyqtSignal()
+    mode_changed      = pyqtSignal(bool)   # True = online, False = offline
 
     def __init__(self, tts_engine=None):
         super().__init__()
-        self._tts = tts_engine
+        self._tts   = tts_engine
         self._history: list[str] = []
-        self._dark = _is_dark_mode()
-        self._speaking = False
+        self._dark  = _is_dark_mode()
+        self._state = ReadState.IDLE
 
         self.setWindowTitle("Veaja")
-        self.setMinimumSize(460, 640)
-        self.resize(480, 660)
+        self.setMinimumSize(460, 660)
+        self.resize(480, 680)
         self._center()
         self._build_ui()
         self._apply_theme()
@@ -78,21 +120,34 @@ class MainWindow(QMainWindow):
     def _header_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
 
-        # Logo (small) — QLabel with QPixmap, much lighter than QSvgWidget
-        # logo_dark.png = dark face on white bg → light mode
-        # logo_light.png = white face on dark bg → dark mode
+        # Avatar — shows logo or custom profile image
         self._header_logo = QLabel()
         self._header_logo.setFixedSize(38, 38)
         self._header_logo.setScaledContents(False)
+        self._header_logo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._header_logo.setToolTip("Edit profile")
+        self._header_logo.mousePressEvent = lambda _: self.profile_requested.emit()
         self._reload_header_logo()
         row.addWidget(self._header_logo)
 
-        title = QLabel("Veaja")
-        title.setObjectName("appTitle")
-        title.setFont(QFont("SF Pro Display", 20, QFont.Weight.Light))
-        row.addWidget(title)
+        # App name (clickable to open profile)
+        self._title_label = QLabel("Veaja")
+        self._title_label.setObjectName("appTitle")
+        self._title_label.setFont(QFont("SF Pro Display", 20, QFont.Weight.Light))
+        self._title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._title_label.setToolTip("Edit profile")
+        self._title_label.mousePressEvent = lambda _: self.profile_requested.emit()
+        row.addWidget(self._title_label)
 
         row.addStretch()
+
+        # Terms / Privacy button
+        self._terms_btn = QPushButton("🔒")
+        self._terms_btn.setObjectName("iconBtn")
+        self._terms_btn.setFixedSize(32, 32)
+        self._terms_btn.setToolTip("Privacy & Terms")
+        self._terms_btn.clicked.connect(self.terms_requested)
+        row.addWidget(self._terms_btn)
 
         # Theme toggle
         self._theme_btn = QPushButton("☀" if self._dark else "☾")
@@ -104,15 +159,16 @@ class MainWindow(QMainWindow):
 
         return row
 
-    def _reload_header_logo(self):
-        name = "logo_light.png" if self._dark else "logo_dark.png"
-        path = os.path.join(ASSETS, name)
-        if os.path.exists(path):
-            px = QPixmap(path).scaled(
-                38, 38,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+    def _reload_header_logo(self, logo_path: str | None = None):
+        """Load avatar from custom path or fall back to bundled logo."""
+        if logo_path and os.path.exists(logo_path):
+            px = _make_round_pixmap(logo_path, 38)
+        else:
+            name = "logo_light.png" if self._dark else "logo_dark.png"
+            path = os.path.join(ASSETS, name)
+            px = _make_round_pixmap(path, 38) if os.path.exists(path) else None
+
+        if px:
             self._header_logo.setPixmap(px)
 
     # ─── Text input ──────────────────────────────────────────────────────
@@ -131,7 +187,8 @@ class MainWindow(QMainWindow):
         self._text_edit = QTextEdit()
         self._text_edit.setObjectName("textEdit")
         self._text_edit.setPlaceholderText(
-            "Type or paste text here, or select text in any app…"
+            "Type or paste text here, or select text in any app…  "
+            "(Ctrl+R to read clipboard directly)"
         )
         self._text_edit.setMinimumHeight(130)
         self._text_edit.setMaximumHeight(200)
@@ -155,10 +212,10 @@ class MainWindow(QMainWindow):
         self._stop_btn = QPushButton("■  Stop")
         self._stop_btn.setObjectName("stopBtn")
         self._stop_btn.setFixedHeight(44)
-        self._stop_btn.setFixedWidth(100)
+        self._stop_btn.setFixedWidth(110)
         self._stop_btn.setFont(QFont("SF Pro Text", 13))
         self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self.stop_requested)
+        self._stop_btn.clicked.connect(self._on_stop_clicked)
         row.addWidget(self._stop_btn)
 
         return row
@@ -174,6 +231,28 @@ class MainWindow(QMainWindow):
         lbl = QLabel("Voice settings")
         lbl.setObjectName("sectionLabel")
         lay.addWidget(lbl)
+
+        # ── Online / Offline mode toggle ──────────────────────────────────
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Mode"))
+
+        self._online_btn = QPushButton("🌐  Online (Neural)")
+        self._online_btn.setObjectName("modeBtn")
+        self._online_btn.setFixedHeight(32)
+        self._online_btn.setCheckable(True)
+        self._online_btn.setChecked(True)
+        self._online_btn.clicked.connect(lambda: self._set_mode(online=True))
+
+        self._offline_btn = QPushButton("💻  Offline (System)")
+        self._offline_btn.setObjectName("modeBtn")
+        self._offline_btn.setFixedHeight(32)
+        self._offline_btn.setCheckable(True)
+        self._offline_btn.setChecked(False)
+        self._offline_btn.clicked.connect(lambda: self._set_mode(online=False))
+
+        mode_row.addWidget(self._online_btn, 1)
+        mode_row.addWidget(self._offline_btn, 1)
+        lay.addLayout(mode_row)
 
         # Voice selector
         row1 = QHBoxLayout()
@@ -266,31 +345,95 @@ class MainWindow(QMainWindow):
         self._text_edit.setPlainText(text)
         self._add_history(text)
 
+    def set_read_state(self, state: ReadState):
+        """Single method that updates all button visuals for the given state."""
+        self._state = state
+        btn  = self._read_btn
+        stop = self._stop_btn
+
+        if state == ReadState.IDLE:
+            btn.setText("▶  Read")
+            btn.setProperty("btnState", "idle")
+            btn.setEnabled(True)
+            stop.setText("■  Stop")
+            stop.setEnabled(False)
+
+        elif state == ReadState.PROCESSING:
+            btn.setText("⏳ Processing…")
+            btn.setProperty("btnState", "processing")
+            btn.setEnabled(False)
+            stop.setText("■  Stop")
+            stop.setEnabled(True)
+
+        elif state == ReadState.SPEAKING:
+            btn.setText("⏸  Pause")
+            btn.setProperty("btnState", "active")   # → red via QSS
+            btn.setEnabled(True)
+            stop.setText("■  Stop")
+            stop.setEnabled(True)
+
+        elif state == ReadState.PAUSED:
+            btn.setText("▶  Resume")
+            btn.setProperty("btnState", "paused")   # → orange via QSS
+            btn.setEnabled(True)
+            stop.setText("■  Stop")
+            stop.setEnabled(True)
+
+        # Force Qt to re-evaluate property-based QSS rules
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        btn.update()
+
+    # Thin shims for backward compatibility (AppController uses set_read_state now)
     def set_processing(self, processing: bool):
-        """Called while edge-tts is synthesising (before audio starts)."""
         if processing:
-            self._read_btn.setEnabled(False)
-            self._read_btn.setText("⏳ Processing…")
-            self._stop_btn.setEnabled(True)   # allow cancel during synthesis
-        else:
-            # Speaking state will follow immediately; only reset if fully idle
-            pass
+            self.set_read_state(ReadState.PROCESSING)
 
     def set_speaking(self, speaking: bool):
-        self._speaking = speaking
-        self._read_btn.setEnabled(not speaking)
-        self._stop_btn.setEnabled(speaking)
-        self._read_btn.setText("🔊 Speaking…" if speaking else "▶  Read")
+        self.set_read_state(ReadState.SPEAKING if speaking else ReadState.IDLE)
+
+    def apply_profile(self, profile: dict):
+        """Update header with user's custom name and avatar."""
+        name = profile.get("app_name", "Veaja") or "Veaja"
+        self._title_label.setText(name)
+        self.setWindowTitle(name)
+        self._reload_header_logo(profile.get("logo_path"))
 
     # ------------------------------------------------------------------ #
     # Slots
     # ------------------------------------------------------------------ #
 
     def _on_read_clicked(self):
-        text = self._text_edit.toPlainText().strip()
-        if text:
-            self._add_history(text)
-            self.read_requested.emit(text)
+        if self._state == ReadState.SPEAKING:
+            self.pause_requested.emit()
+        elif self._state == ReadState.PAUSED:
+            self.resume_requested.emit()
+        else:
+            text = self._text_edit.toPlainText().strip()
+            if text:
+                self._add_history(text)
+                self.read_requested.emit(text)
+
+    def _on_stop_clicked(self):
+        if self._state == ReadState.PROCESSING:
+            self.stop_requested.emit()    # cancel synthesis
+        elif self._state == ReadState.SPEAKING:
+            self.pause_requested.emit()   # first stop click = pause
+        elif self._state == ReadState.PAUSED:
+            self.stop_requested.emit()    # stop while paused = full stop
+        else:
+            self.stop_requested.emit()
+
+    def _set_mode(self, online: bool):
+        """Toggle between online (neural) and offline (system) mode."""
+        self._online_btn.setChecked(online)
+        self._offline_btn.setChecked(not online)
+        self.mode_changed.emit(online)
+
+    def set_online_mode(self, online: bool):
+        """Called by AppController to reflect current engine state."""
+        self._online_btn.setChecked(online)
+        self._offline_btn.setChecked(not online)
 
     def _on_voice_changed(self, index: int):
         if self._tts:

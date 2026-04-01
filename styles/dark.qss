@@ -47,7 +47,7 @@ QTextEdit#textEdit:focus {
     border: 1px solid #0A84FF;
 }
 
-/* Read button */
+/* Read button — idle (blue) */
 QPushButton#readBtn {
     background-color: #0A84FF;
     color: #FFFFFF;
@@ -57,9 +57,47 @@ QPushButton#readBtn {
     font-weight: 500;
     padding: 0 20px;
 }
-QPushButton#readBtn:hover  { background-color: #339AF0; }
-QPushButton#readBtn:pressed{ background-color: #0070D4; }
-QPushButton#readBtn:disabled{background-color: #3A3A3C; color: #636366;}
+QPushButton#readBtn:hover   { background-color: #339AF0; }
+QPushButton#readBtn:pressed { background-color: #0070D4; }
+QPushButton#readBtn:disabled{ background-color: #3A3A3C; color: #636366; }
+
+/* Read button — PROCESSING (muted gray) */
+QPushButton#readBtn[btnState="processing"] {
+    background-color: #3A3A3C;
+    color: #8E8E93;
+}
+
+/* Read button — SPEAKING / active (RED) */
+QPushButton#readBtn[btnState="active"] {
+    background-color: #FF453A;
+    color: #FFFFFF;
+}
+QPushButton#readBtn[btnState="active"]:hover   { background-color: #FF6961; }
+QPushButton#readBtn[btnState="active"]:pressed { background-color: #D93025; }
+
+/* Read button — PAUSED (orange) */
+QPushButton#readBtn[btnState="paused"] {
+    background-color: #FF9F0A;
+    color: #FFFFFF;
+}
+QPushButton#readBtn[btnState="paused"]:hover   { background-color: #FFB340; }
+QPushButton#readBtn[btnState="paused"]:pressed { background-color: #E08600; }
+
+/* Online / Offline mode toggle buttons */
+QPushButton#modeBtn {
+    background-color: #2C2C2E;
+    color: #8E8E93;
+    border: 1px solid #3A3A3C;
+    border-radius: 8px;
+    font-size: 12px;
+    padding: 0 8px;
+}
+QPushButton#modeBtn:checked {
+    background-color: #0A84FF;
+    color: #FFFFFF;
+    border-color: #0A84FF;
+}
+QPushButton#modeBtn:hover:!checked { background-color: #3A3A3C; }
 
 /* Stop button */
 QPushButton#stopBtn {

@@ -15,7 +15,7 @@ import ctypes
 import platform
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel,
-    QSizePolicy, QApplication, QMenu
+    QSizePolicy, QApplication, QMenu, QPushButton
 )
 from PyQt6.QtCore import (
     Qt, QPoint, QRectF, QVariantAnimation,
@@ -116,39 +116,55 @@ def _is_dark_mode() -> bool:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class _LogoCircle(QWidget):
-    """Renders the Veaja PNG logo clipped to a circle. PNG is used instead
-    of SVG for faster load time and lower CPU cost during paint."""
+    """Renders the Veaja logo (or user avatar) clipped to a circle."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(LOGO_SIZE, LOGO_SIZE)
         self._pixmap: QPixmap | None = None
+        self._custom_path: str | None = None   # user avatar path when set
         self._load_png()
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
+    # ── Load helpers ──────────────────────────────────────────────────────────
+
     def _load_png(self, dark: bool | None = None):
-        """
-        logo_dark.png  = dark artwork on WHITE background → use in LIGHT mode
-        logo_light.png = light artwork on DARK background → use in DARK mode
-        """
+        """Load bundled Veaja logo (dark/light variant)."""
         if dark is None:
             dark = _is_dark_mode()
         name = "logo_light.png" if dark else "logo_dark.png"
         path = os.path.join(ASSETS, name)
+        self._set_pixmap_from_path(path)
+
+    def _set_pixmap_from_path(self, path: str):
         if os.path.exists(path):
-            # Load once and scale to exact widget size — cached by Qt
             raw = QPixmap(path)
             self._pixmap = raw.scaled(
                 LOGO_SIZE, LOGO_SIZE,
-                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
         else:
             self._pixmap = None
         self.update()
 
-    def reload_for_theme(self, dark: bool):
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def load_custom(self, path: str):
+        """Switch to user's custom avatar image."""
+        self._custom_path = path
+        self._set_pixmap_from_path(path)
+
+    def reset_to_default(self, dark: bool | None = None):
+        """Switch back to bundled Veaja logo."""
+        self._custom_path = None
         self._load_png(dark)
+
+    def reload_for_theme(self, dark: bool):
+        if self._custom_path:
+            pass   # custom avatar doesn't change with theme
+        else:
+            self._load_png(dark)
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -179,9 +195,12 @@ class _LogoCircle(QWidget):
                              Qt.AlignmentFlag.AlignCenter, "V")
             return
 
-        # Thin ring border
+        # Thin ring border — use parent's stored _dark if available
         painter.setClipping(False)
-        dark = _is_dark_mode()
+        try:
+            dark = self.parent()._dark
+        except AttributeError:
+            dark = _is_dark_mode()
         border_color = QColor(100, 100, 100, 180) if dark else QColor(200, 200, 200, 200)
         painter.setPen(QPen(border_color, 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -207,6 +226,7 @@ class OverlayWidget(QWidget):
     settings_requested = pyqtSignal()
     overlay_shown      = pyqtSignal()
     overlay_hidden     = pyqtSignal()
+    reset_requested    = pyqtSignal()        # emitted when user clicks ⟳ reset
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -214,11 +234,15 @@ class OverlayWidget(QWidget):
         # State
         self._text: str = ""
         self._speaking: bool = False
-        self._processing: bool = False    # True while synthesising audio
+        self._processing: bool = False
+        self._paused: bool = False
         self._press_pos: QPoint | None = None
         self._dragging: bool = False
         self._expanded: bool = False
-        self._dot_count: int = 0          # animated dots counter
+        self._dot_count: int = 0
+        # Dark mode stored explicitly — don't rely on per-paint detection
+        # because Qt may misread Windows 11 dark mode from QPalette.
+        self._dark: bool = _is_dark_mode()
 
         self._setup_window()
         self._build_ui()
@@ -255,8 +279,11 @@ class OverlayWidget(QWidget):
         self._logo = _LogoCircle()
         outer.addWidget(self._logo)
 
-        # Text panel (hidden until hover)
+        # Text panel (hidden until hover) — must be transparent so the
+        # pill's painted background shows through in both dark and light mode.
         self._text_panel = QWidget()
+        self._text_panel.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._text_panel.setStyleSheet("background: transparent;")
         self._text_panel.setFixedHeight(LOGO_SIZE)
         self._text_panel.setMaximumWidth(0)
         self._text_panel.setMinimumWidth(0)
@@ -268,12 +295,29 @@ class OverlayWidget(QWidget):
         tp_layout.setContentsMargins(12, 6, 10, 6)
         tp_layout.setSpacing(2)
 
+        # Title row: label + spacer + reset button
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(4)
+
         self._title_label = QLabel("Veaja is ready")
         self._title_label.setObjectName("overlayTitle")
         font_title = QFont()
         font_title.setPointSize(10)
         font_title.setWeight(QFont.Weight.Medium)
         self._title_label.setFont(font_title)
+
+        self._reset_btn = QPushButton("⟳")
+        self._reset_btn.setObjectName("overlayResetBtn")
+        self._reset_btn.setToolTip("Restart reading from beginning")
+        self._reset_btn.setFixedSize(22, 22)
+        self._reset_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._reset_btn.clicked.connect(self.reset_requested)
+        self._reset_btn.setStyleSheet("background: transparent; border: none; font-size: 13px;")
+
+        title_row.addWidget(self._title_label)
+        title_row.addStretch()
+        title_row.addWidget(self._reset_btn)
 
         self._body_label = QLabel("Select text to read…")
         self._body_label.setObjectName("overlayBody")
@@ -282,11 +326,12 @@ class OverlayWidget(QWidget):
         font_body.setPointSize(9)
         self._body_label.setFont(font_body)
 
-        tp_layout.addWidget(self._title_label)
+        tp_layout.addLayout(title_row)
         tp_layout.addWidget(self._body_label)
         tp_layout.addStretch()
 
         outer.addWidget(self._text_panel)
+        self._update_label_colors()
 
     # ------------------------------------------------------------------ #
     # Animations
@@ -327,6 +372,36 @@ class OverlayWidget(QWidget):
     # Keep-on-top timer
     # ------------------------------------------------------------------ #
 
+    def _update_label_colors(self, dark: bool | None = None, speaking: bool = False,
+                             paused: bool = False):
+        """
+        Explicitly set label text colours — overlay doesn't inherit from QSS.
+          speaking=True → title turns RED
+          paused=True   → title turns ORANGE
+          otherwise     → normal colours for dark/light mode
+        """
+        if dark is None:
+            dark = self._dark   # use stored flag, not live detection
+
+        if speaking:
+            title_color = "#FF453A" if dark else "#FF3B30"   # red
+        elif paused:
+            title_color = "#FF9F0A" if dark else "#FF9500"   # orange
+        else:
+            title_color = "#F5F5F7" if dark else "#1C1C1E"   # normal
+
+        body_color = "#AEAEB2" if dark else "#6C6C70"
+
+        self._title_label.setStyleSheet(
+            f"color: {title_color}; background: transparent;"
+        )
+        self._body_label.setStyleSheet(
+            f"color: {body_color}; background: transparent;"
+        )
+        self._reset_btn.setStyleSheet(
+            f"color: {body_color}; background: transparent; border: none; font-size: 13px;"
+        )
+
     def _build_dot_timer(self):
         """Animates '.' → '..' → '...' while processing."""
         self._dot_timer = QTimer(self)
@@ -355,13 +430,14 @@ class OverlayWidget(QWidget):
     # Public API
     # ------------------------------------------------------------------ #
 
-    def set_text(self, text: str):
+    def set_text(self, text: str, auto_show: bool = True):
         """Called by AppController when new selected text is ready."""
         self._text = text
         display = text if len(text) <= 120 else text[:117] + "…"
         self._body_label.setText(display)
         self._title_label.setText("Tap to read" if text else "Veaja is ready")
-        self.show_overlay()
+        if auto_show:
+            self.show_overlay()
 
     def show_overlay(self):
         self.show()
@@ -406,7 +482,8 @@ class OverlayWidget(QWidget):
             self._dot_count = 0
             self._dot_timer.start()
             self._title_label.setText("Processing")
-            self._expand()          # keep pill open so user sees the state
+            self._update_label_colors()   # normal colour while processing
+            self._expand()
         else:
             self._dot_timer.stop()
         self.update()
@@ -414,17 +491,71 @@ class OverlayWidget(QWidget):
     def set_speaking(self, speaking: bool):
         self._speaking = speaking
         self._processing = False
+        self._paused = False
         self._dot_timer.stop()
         if speaking:
             self._title_label.setText("Speaking…  ■ click to stop")
+            self._update_label_colors(speaking=True)   # title → RED
             self._expand()
         else:
             self._title_label.setText("Tap to read" if self._text else "Veaja is ready")
+            self._update_label_colors()                # restore normal
         self.update()
+
+    def set_paused(self, paused: bool):
+        """Show paused state — click overlay to resume."""
+        self._paused = paused
+        self._speaking = False
+        self._processing = False
+        self._dot_timer.stop()
+        if paused:
+            self._title_label.setText("Paused  ▶ click to resume")
+            self._update_label_colors(paused=True)     # title → ORANGE
+            self._expand()
+        else:
+            self._title_label.setText("Tap to read" if self._text else "Veaja is ready")
+            self._update_label_colors()                # restore normal
+        self.update()
+
+    def apply_profile(self, profile: dict):
+        """
+        Called by AppController when user saves their profile.
+        Swaps the overlay logo to their custom avatar, or resets to default.
+        """
+        logo_path = profile.get("logo_path")
+        if logo_path and os.path.exists(logo_path):
+            self._logo.load_custom(logo_path)
+        else:
+            self._logo.reset_to_default()
+
+    def show_near(self, screen_x: int, screen_y: int):
+        """
+        Show the overlay pill near the given screen coordinates.
+        Places the overlay to the LEFT of the cursor, centered vertically —
+        approximating the left edge of the selected text block at mid-height.
+        Clamps to screen bounds so it never goes off-screen.
+        """
+        screen = QApplication.primaryScreen().availableGeometry()
+        # Place to the left of the cursor, vertically centred on it
+        x = screen_x - self.width() - 20
+        y = screen_y - self.height() // 2
+        # If not enough room on the left, fall back to the right
+        if x < screen.left() + 10:
+            x = screen_x + 20
+        # Clamp to screen bounds
+        x = min(x, screen.right()  - self.width()  - 10)
+        y = max(y, screen.top()    + 10)
+        y = min(y, screen.bottom() - self.height() - 10)
+        self.move(x, y)
+        self.show_overlay()
 
     def update_theme(self, dark: bool):
         """Called by AppController when user toggles the theme."""
+        self._dark = dark
         self._logo.reload_for_theme(dark)
+        self._update_label_colors(dark,
+                                  speaking=self._speaking,
+                                  paused=self._paused)
         self.update()
 
     # ------------------------------------------------------------------ #
@@ -435,11 +566,13 @@ class OverlayWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        dark = _is_dark_mode()
-        bg    = QColor(28, 28, 30, 235) if dark else QColor(255, 255, 255, 240)
-        border = QColor(70, 70, 75, 200) if dark else QColor(210, 210, 215, 200)
+        # Use stored _dark flag — never call _is_dark_mode() here because
+        # Qt may misread the Windows 11 dark mode palette, causing every
+        # repaint to flip the pill colour incorrectly.
+        bg     = QColor(38, 38, 40, 245) if self._dark else QColor(255, 255, 255, 240)
+        border = QColor(70, 70, 75, 200) if self._dark else QColor(210, 210, 215, 200)
 
-        rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+        rect   = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
         radius = PILL_HEIGHT / 2
 
         painter.setBrush(QBrush(bg))
@@ -473,10 +606,10 @@ class OverlayWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if not self._dragging:
                 if self._speaking or self._processing:
-                    # While active: click = stop
-                    self.stop_requested.emit()
+                    self.stop_requested.emit()   # pause (AppController decides)
+                elif self._paused:
+                    self.stop_requested.emit()   # resume (AppController decides)
                 elif self._text:
-                    # While idle: click = read
                     self.read_requested.emit(self._text)
             self._press_pos = None
             self._dragging = False
