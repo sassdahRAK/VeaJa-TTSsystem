@@ -13,10 +13,11 @@ PROFILE_DIR  = Path.home() / ".veaja"
 PROFILE_PATH = PROFILE_DIR / "profile.json"
 
 DEFAULT_PROFILE: dict = {
-    "version":        1,
-    "app_name":       "Veaja",
-    "logo_path":      None,    # null = use bundled logo
-    "terms_accepted": False,
+    "version":         1,
+    "app_name":        "Veaja",
+    "logo_path":       None,         # null = use bundled logo
+    "terms_accepted":  False,
+    "highlight_color": "#FFD60A",    # word-highlight colour (yellow)
 }
 
 

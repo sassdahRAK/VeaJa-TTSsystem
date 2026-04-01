@@ -7,14 +7,10 @@ Changes are only committed when the user clicks Save.
 import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QFileDialog, QFrame
+    QPushButton, QLineEdit, QFileDialog, QFrame, QColorDialog
 )
-# from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtCore import Qt, QSize, QRectF
-from PyQt6.QtGui import QFont, QPixmap, QPainter, QPainterPath
-# from PyQt6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QRectF
-from PyQt6.QtGui import QFont, QPixmap, QPainter, QPainterPath
-from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtGui import QFont, QPixmap, QPainter, QPainterPath, QColor
 
 ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
 
@@ -115,6 +111,31 @@ class ProfileDialog(QDialog):
 
         lay.addWidget(self._divider())
 
+        # ── Highlight colour ──────────────────────────────────────────────────
+        lay.addWidget(QLabel("Word highlight colour"))
+        color_row = QHBoxLayout()
+
+        self._color_swatch = QPushButton()
+        self._color_swatch.setFixedSize(36, 36)
+        self._color_swatch.setToolTip("Click to change")
+        self._color_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._color_swatch.clicked.connect(self._pick_color)
+        self._refresh_swatch()
+        color_row.addWidget(self._color_swatch)
+
+        color_hint = QLabel("Colour applied while reading (word by word)")
+        color_hint.setStyleSheet("color: #8E8E93; font-size: 11px;")
+        color_row.addWidget(color_hint, 1)
+
+        reset_color_btn = QPushButton("Reset")
+        reset_color_btn.setFixedHeight(28)
+        reset_color_btn.clicked.connect(self._reset_color)
+        color_row.addWidget(reset_color_btn)
+
+        lay.addLayout(color_row)
+
+        lay.addWidget(self._divider())
+
         # ── Buttons ───────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancel")
@@ -146,6 +167,23 @@ class ProfileDialog(QDialog):
     def _reset_avatar(self):
         self._profile["logo_path"] = None
         self._refresh_avatar()
+
+    def _pick_color(self):
+        initial = QColor(self._profile.get("highlight_color", "#FFD60A"))
+        color = QColorDialog.getColor(initial, self, "Choose Highlight Colour")
+        if color.isValid():
+            self._profile["highlight_color"] = color.name()
+            self._refresh_swatch()
+
+    def _reset_color(self):
+        self._profile["highlight_color"] = "#FFD60A"
+        self._refresh_swatch()
+
+    def _refresh_swatch(self):
+        color = self._profile.get("highlight_color", "#FFD60A") or "#FFD60A"
+        self._color_swatch.setStyleSheet(
+            f"background-color: {color}; border: 1px solid #555; border-radius: 6px;"
+        )
 
     def _on_save(self):
         name = self._name_edit.text().strip()

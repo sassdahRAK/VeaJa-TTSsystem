@@ -13,6 +13,7 @@ from core.tts_engine import TTSEngine
 from core.selection_monitor import SelectionMonitor
 from core.audio_history import AudioHistory
 from core.profile import ProfileManager
+from core.language import filter_for_tts, language_display_name
 from gui.main_window import MainWindow, ReadState
 from gui.overlay_widget import OverlayWidget
 from gui.tray_icon import TrayIcon
@@ -75,6 +76,7 @@ class AppController(QObject):
         self._main_window.terms_requested.connect(self._show_terms)
         self._main_window.profile_requested.connect(self._show_profile_dialog)
         self._main_window.mode_changed.connect(self._on_mode_changed)
+        self._main_window.tour_requested.connect(self._show_tour)
 
         # Profile changes → update UI
         self._profile.profile_changed.connect(self._on_profile_changed)
@@ -121,10 +123,20 @@ class AppController(QObject):
 
     def _on_text_ready(self, text: str):
         from PyQt6.QtGui import QCursor
+        # New text always replaces the current session — stop whatever is playing
+        # so the Read button (and Ctrl+R) starts fresh instead of pause/resuming.
+        if self._tts.is_speaking() or self._tts.is_paused():
+            self._tts.stop()
+            self._on_speaking_finished()   # reset UI to IDLE immediately
         self._overlay.set_text(text, auto_show=False)
         self._main_window.set_text(text)
-        pos = QCursor.pos()
-        self._overlay.show_near(pos.x(), pos.y())
+        # Position rule: snap near the cursor ONLY on first appearance.
+        # If the overlay is already visible, leave it exactly where it is.
+        if not self._overlay.isVisible():
+            pos = QCursor.pos()
+            self._overlay.show_near(pos.x(), pos.y())
+        else:
+            self._overlay.show_overlay()   # bring to front without moving
 
     # ------------------------------------------------------------------ #
     # Ctrl+R hotkey — read current clipboard immediately
@@ -142,12 +154,14 @@ class AppController(QObject):
         if not text:
             return
         self._main_window.set_text(text)
+        self._overlay.set_text(text, auto_show=False)
+        # Position rule: snap near the cursor ONLY on first appearance.
+        # If the overlay is already visible, leave it exactly where it is.
         if not self._overlay.isVisible():
-            self._overlay.set_text(text)
             pos = QCursor.pos()
             self._overlay.show_near(pos.x(), pos.y())
         else:
-            self._overlay.set_text(text)
+            self._overlay.show_overlay()   # bring to front without moving
         self._speak(text)
 
     # ------------------------------------------------------------------ #
@@ -157,18 +171,63 @@ class AppController(QObject):
     def _speak(self, text: str):
         if not text.strip():
             return
-        self._current_text = text
+
+        # ── Language protection layer ─────────────────────────────────────────
+        # Filter text to the current TTS language (English mode by default).
+        # Never crashes — filter_for_tts always returns a safe result.
+        try:
+            filtered, was_filtered, detected_lang = filter_for_tts(text, target_lang="en")
+        except Exception:
+            filtered, was_filtered, detected_lang = text, False, "en"
+
+        if not filtered.strip():
+            # Nothing readable in English — notify and abort gracefully
+            lang_name = language_display_name(detected_lang)
+            self._tray.show_notification(
+                "Veaja — Language not supported",
+                f"No English text found in selection. "
+                f"(Detected: {lang_name})\n"
+                "Switch to Offline mode or select English text."
+            )
+            return
+
+        if was_filtered:
+            # Inform user that only the English portion will be read
+            lang_name = language_display_name(detected_lang)
+            self._tray.show_notification(
+                "Veaja — Mixed language",
+                f"Detected: {lang_name}. Reading English portions only."
+            )
+            # Update text box to show exactly what will be read
+            self._main_window.set_text(filtered)
+            self._overlay.set_text(filtered, auto_show=False)
+
+        # ── Speak ─────────────────────────────────────────────────────────────
+        self._current_text = filtered
         session_path = self._audio.next_session_path()
-        self._tts.speak(
-            text,
-            on_preparing = self._on_preparing_speech,
-            on_start     = self._on_speaking_started,
-            on_finish    = self._on_speaking_finished,
-            on_error     = self._on_speaking_error,
-            on_paused    = self._on_speaking_paused,
-            on_resumed   = self._on_speaking_resumed,
-            session_path = session_path,
-        )
+
+        def _on_word(start: int, end: int):
+            # Dashboard: cumulative yellow progress bar
+            self._main_window.highlight_word(start, end)
+            # Overlay pill: karaoke display (works even in PDFs / Word)
+            self._overlay.set_current_word(start, end)
+
+        try:
+            self._tts.speak(
+                filtered,
+                on_preparing      = self._on_preparing_speech,
+                on_start          = self._on_speaking_started,
+                on_finish         = self._on_speaking_finished,
+                on_error          = self._on_speaking_error,
+                on_paused         = self._on_speaking_paused,
+                on_resumed        = self._on_speaking_resumed,
+                on_word_highlight = _on_word,
+                session_path      = session_path,
+            )
+        except Exception as exc:
+            # Catch any unexpected TTS startup failure — never crash the app
+            self._on_speaking_finished()
+            self._tray.show_notification("Veaja — TTS error", str(exc))
 
     def _stop_speaking(self):
         self._tts.stop()
@@ -214,6 +273,7 @@ class AppController(QObject):
         self._overlay.set_processing(False)
         self._overlay.set_speaking(True)
         self._main_window.set_read_state(ReadState.SPEAKING)
+        self._main_window.mark_reading_started(self._current_text)
 
     def _on_speaking_paused(self):
         self._overlay.set_speaking(False)
@@ -230,6 +290,8 @@ class AppController(QObject):
         self._overlay.set_speaking(False)
         self._overlay.set_paused(False)
         self._main_window.set_read_state(ReadState.IDLE)
+        self._main_window.clear_highlight()
+        self._main_window.mark_reading_started("")   # nothing playing now
 
     def _on_speaking_error(self, msg: str):
         self._on_speaking_finished()
@@ -277,6 +339,11 @@ class AppController(QObject):
         dlg = ProfileDialog(self._profile.get(), parent=self._main_window)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._profile.save(dlg.get_profile())
+
+    def _show_tour(self):
+        from gui.tour_overlay import TourOverlay
+        tour = TourOverlay(self._main_window)
+        tour.show()
 
     def _on_profile_changed(self, profile: dict):
         self._main_window.apply_profile(profile)

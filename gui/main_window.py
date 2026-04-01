@@ -24,7 +24,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 # from PyQt6.QtGui import QIcon, QFont, QPalette, QColor, QPixmap, QPainter, QPainterPath, QRectF
 # AFTER (fixed) — split into two imports
-from PyQt6.QtGui import QIcon, QFont, QPalette, QColor, QPixmap, QPainter, QPainterPath
+from PyQt6.QtGui import (
+    QIcon, QFont, QPalette, QColor, QPixmap,
+    QPainter, QPainterPath, QTextCursor, QTextCharFormat, QBrush
+)
 from PyQt6.QtCore import QRectF
 
 ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
@@ -80,6 +83,7 @@ class MainWindow(QMainWindow):
     terms_requested   = pyqtSignal()
     profile_requested = pyqtSignal()
     mode_changed      = pyqtSignal(bool)   # True = online, False = offline
+    tour_requested    = pyqtSignal()
 
     def __init__(self, tts_engine=None):
         super().__init__()
@@ -87,6 +91,10 @@ class MainWindow(QMainWindow):
         self._history: list[str] = []
         self._dark  = _is_dark_mode()
         self._state = ReadState.IDLE
+        self._logo_path: str | None = None          # persists across theme changes
+        self._highlight_color: str = "#FFD60A"       # default yellow; customisable
+        self._last_highlight_end: int = 0
+        self._last_read_text: str = ""               # tracks what is currently playing
 
         self.setWindowTitle("Veaja")
         self.setMinimumSize(460, 660)
@@ -141,6 +149,14 @@ class MainWindow(QMainWindow):
 
         row.addStretch()
 
+        # Tutorial button
+        self._tour_btn = QPushButton("?")
+        self._tour_btn.setObjectName("iconBtn")
+        self._tour_btn.setFixedSize(32, 32)
+        self._tour_btn.setToolTip("Interactive tutorial")
+        self._tour_btn.clicked.connect(self.tour_requested)
+        row.addWidget(self._tour_btn)
+
         # Terms / Privacy button
         self._terms_btn = QPushButton("🔒")
         self._terms_btn.setObjectName("iconBtn")
@@ -160,9 +176,17 @@ class MainWindow(QMainWindow):
         return row
 
     def _reload_header_logo(self, logo_path: str | None = None):
-        """Load avatar from custom path or fall back to bundled logo."""
-        if logo_path and os.path.exists(logo_path):
-            px = _make_round_pixmap(logo_path, 38)
+        """
+        Load avatar from custom path or fall back to bundled logo.
+        When called without arguments (e.g. on theme toggle) the previously
+        stored logo_path is used so a custom avatar is never lost.
+        """
+        # If a new path is provided, remember it; otherwise use whatever was stored.
+        if logo_path is not None:
+            self._logo_path = logo_path if (logo_path and os.path.exists(logo_path)) else None
+
+        if self._logo_path and os.path.exists(self._logo_path):
+            px = _make_round_pixmap(self._logo_path, 38)
         else:
             name = "logo_light.png" if self._dark else "logo_dark.png"
             path = os.path.join(ASSETS, name)
@@ -342,6 +366,7 @@ class MainWindow(QMainWindow):
 
     def set_text(self, text: str):
         """Called by AppController when clipboard/selection text arrives."""
+        self.clear_highlight()
         self._text_edit.setPlainText(text)
         self._add_history(text)
 
@@ -398,21 +423,68 @@ class MainWindow(QMainWindow):
         self._title_label.setText(name)
         self.setWindowTitle(name)
         self._reload_header_logo(profile.get("logo_path"))
+        # Custom highlight color (default yellow #FFD60A if not set)
+        color = profile.get("highlight_color", "#FFD60A")
+        if color:
+            self._highlight_color = color
+
+    # ------------------------------------------------------------------ #
+    # Word highlight (called from AppController via word_highlight signal)
+    # ------------------------------------------------------------------ #
+
+    def highlight_word(self, start: int, end: int):
+        """
+        Cumulatively highlight the text from 0 … end in the user's chosen
+        colour.  Only extends the highlighted region — never shrinks it —
+        so the progress bar effect (0 → 100 %) feels smooth.
+        """
+        if end <= self._last_highlight_end or end <= start:
+            return
+        doc = self._text_edit.document()
+        cursor = QTextCursor(doc)
+        cursor.setPosition(self._last_highlight_end)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor(self._highlight_color))
+        cursor.setCharFormat(fmt)
+        self._last_highlight_end = end
+
+    def clear_highlight(self):
+        """Remove all word highlighting and reset progress."""
+        if self._last_highlight_end == 0:
+            return
+        doc = self._text_edit.document()
+        cursor = QTextCursor(doc)
+        cursor.select(QTextCursor.SelectionType.Document)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QBrush())   # empty brush = no background
+        cursor.setCharFormat(fmt)
+        self._last_highlight_end = 0
 
     # ------------------------------------------------------------------ #
     # Slots
     # ------------------------------------------------------------------ #
 
     def _on_read_clicked(self):
-        if self._state == ReadState.SPEAKING:
+        text = self._text_edit.toPlainText().strip()
+
+        # If the text box content changed since we started reading, always
+        # start fresh — regardless of whether we are SPEAKING or PAUSED.
+        text_changed = bool(text) and (text != self._last_read_text)
+
+        if not text_changed and self._state == ReadState.SPEAKING:
             self.pause_requested.emit()
-        elif self._state == ReadState.PAUSED:
+        elif not text_changed and self._state == ReadState.PAUSED:
             self.resume_requested.emit()
         else:
-            text = self._text_edit.toPlainText().strip()
             if text:
+                self._last_read_text = text
                 self._add_history(text)
                 self.read_requested.emit(text)
+
+    def mark_reading_started(self, text: str):
+        """Called by AppController when TTS actually starts so we know what is playing."""
+        self._last_read_text = text
 
     def _on_stop_clicked(self):
         if self._state == ReadState.PROCESSING:

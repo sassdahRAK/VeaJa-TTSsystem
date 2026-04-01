@@ -322,6 +322,7 @@ class OverlayWidget(QWidget):
         self._body_label = QLabel("Select text to read…")
         self._body_label.setObjectName("overlayBody")
         self._body_label.setWordWrap(True)
+        self._body_label.setTextFormat(Qt.TextFormat.RichText)   # needed for karaoke HTML
         font_body = QFont()
         font_body.setPointSize(9)
         self._body_label.setFont(font_body)
@@ -498,9 +499,52 @@ class OverlayWidget(QWidget):
             self._update_label_colors(speaking=True)   # title → RED
             self._expand()
         else:
+            # Reset body label to plain preview text
+            display = self._text if len(self._text) <= 120 else self._text[:117] + "…"
+            self._body_label.setText(display)
             self._title_label.setText("Tap to read" if self._text else "Veaja is ready")
             self._update_label_colors()                # restore normal
         self.update()
+
+    def set_current_word(self, char_start: int, char_end: int):
+        """
+        Karaoke-style highlight in the overlay body label.
+        Called every ~40 ms while speaking so the current word glows yellow.
+        Works in ALL contexts — even when reading a PDF or Word document —
+        because it only updates the pill's own label, not the third-party app.
+        """
+        if not self._speaking or not self._text:
+            return
+
+        import html as _html
+
+        text = self._text
+        char_start = max(0, min(char_start, len(text)))
+        char_end   = max(char_start, min(char_end, len(text)))
+
+        # Show a context window: ~35 chars before + current word + ~80 chars after
+        ctx_before = 35
+        ctx_after  = 80
+
+        before = text[:char_start]
+        word   = text[char_start:char_end]
+        after  = text[char_end:]
+
+        if len(before) > ctx_before:
+            before = "\u2026" + before[-ctx_before:]
+        if len(after) > ctx_after:
+            after = after[:ctx_after] + "\u2026"
+
+        body_color = "#AEAEB2" if self._dark else "#6C6C70"
+        word_color = "#FFD60A"   # yellow — always visible on both themes
+
+        html_text = (
+            f"<span style='color:{body_color}'>{_html.escape(before)}</span>"
+            f"<span style='color:{word_color};font-weight:bold'>"
+            f"{_html.escape(word)}</span>"
+            f"<span style='color:{body_color}'>{_html.escape(after)}</span>"
+        )
+        self._body_label.setText(html_text)
 
     def set_paused(self, paused: bool):
         """Show paused state — click overlay to resume."""

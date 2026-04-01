@@ -96,6 +96,7 @@ class EdgeTTSWorker(QThread):
     resumed_speaking  = pyqtSignal()
     finished_speaking = pyqtSignal()
     error_occurred    = pyqtSignal(str)
+    word_highlight    = pyqtSignal(int, int)   # (char_start, char_end) in full text
 
     def __init__(self, text: str, voice: str = "en-US-AriaNeural",
                  rate: str = "+0%", volume: float = 1.0,
@@ -114,8 +115,17 @@ class EdgeTTSWorker(QThread):
     # ── Main thread body ──────────────────────────────────────────────────────
 
     def run(self):
-        sentences   = _split_sentences(self._text)
+        sentences  = _split_sentences(self._text)
         tmp_files: list[str] = []
+
+        # Pre-compute where each sentence starts in the original text so that
+        # WordBoundary char offsets can be mapped back to the full document.
+        char_offsets: list[int] = []
+        search_pos = 0
+        for s in sentences:
+            idx = self._text.find(s, search_pos)
+            char_offsets.append(idx if idx != -1 else search_pos)
+            search_pos = (idx if idx != -1 else search_pos) + len(s)
 
         try:
             self.preparing_speech.emit()
@@ -127,7 +137,7 @@ class EdgeTTSWorker(QThread):
                     if self._stop_event.is_set():
                         break
 
-                    tmp_path = next_future.result()
+                    tmp_path, boundaries = next_future.result()
 
                     # Pre-fetch next sentence while this one plays
                     if i + 1 < len(sentences) and not self._stop_event.is_set():
@@ -136,17 +146,32 @@ class EdgeTTSWorker(QThread):
                     if tmp_path is None or self._stop_event.is_set():
                         break
 
+                    # Guard: skip empty audio files (can happen with non-Latin
+                    # text that slips through the language filter — prevents
+                    # pygame from crashing on a zero-byte MP3).
+                    try:
+                        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 64:
+                            continue
+                    except OSError:
+                        continue
+
                     tmp_files.append(tmp_path)
                     self._sentence_mp3s.append(tmp_path)
 
                     if i == 0:
                         self.started_speaking.emit()
 
-                    pygame.mixer.music.load(tmp_path)
-                    pygame.mixer.music.set_volume(self._volume)
-                    pygame.mixer.music.play()
+                    try:
+                        pygame.mixer.music.load(tmp_path)
+                        pygame.mixer.music.set_volume(self._volume)
+                        pygame.mixer.music.play()
+                    except Exception as load_exc:
+                        self.error_occurred.emit(f"Audio load error: {load_exc}")
+                        continue
 
-                    # ── Playback loop — handles stop and pause ──────────────
+                    sentence_char_offset = char_offsets[i]
+
+                    # ── Playback loop — handles stop, pause, and word highlight ──
                     while pygame.mixer.music.get_busy():
                         if self._stop_event.is_set():
                             pygame.mixer.music.stop()
@@ -167,6 +192,14 @@ class EdgeTTSWorker(QThread):
                                 self.resumed_speaking.emit()
                             if self._stop_event.is_set():
                                 break
+
+                        # Emit word highlight based on current playback position
+                        if boundaries:
+                            pos_ms = pygame.mixer.music.get_pos()
+                            if pos_ms >= 0:
+                                self._emit_word_highlight(
+                                    boundaries, sentence_char_offset, pos_ms
+                                )
 
                         self.msleep(40)
                     # ────────────────────────────────────────────────────────
@@ -196,34 +229,73 @@ class EdgeTTSWorker(QThread):
 
             self.finished_speaking.emit()
 
+    # ── Word highlight helper ──────────────────────────────────────────────────
+
+    def _emit_word_highlight(self, boundaries: list[dict],
+                             sentence_offset: int, pos_ms: int):
+        """Find the word at pos_ms and emit word_highlight(char_start, char_end)."""
+        best = None
+        for wb in boundaries:
+            end_ms = wb["offset_ms"] + wb["duration_ms"]
+            if wb["offset_ms"] <= pos_ms:
+                best = wb       # last word whose start is <= current position
+            if wb["offset_ms"] > pos_ms:
+                break
+        if best is not None:
+            start = sentence_offset + best["text_offset"]
+            end   = start + best["word_length"]
+            self.word_highlight.emit(start, end)
+
     # ── Per-sentence synthesis (pool thread) ──────────────────────────────────
 
-    def _synthesise(self, sentence: str) -> str | None:
+    def _synthesise(self, sentence: str) -> tuple[str | None, list[dict]]:
+        """
+        Synthesise one sentence.
+        Returns (mp3_path, word_boundaries) where word_boundaries is a list of:
+          {"offset_ms": int, "duration_ms": int,
+           "text": str, "text_offset": int, "word_length": int}
+        offset_ms / duration_ms are milliseconds from start of sentence audio.
+        """
         try:
             import edge_tts
         except ImportError:
             self.error_occurred.emit(
                 "edge-tts not installed. Run: pip install edge-tts"
             )
-            return None
+            return None, []
 
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         tmp.close()
 
+        word_boundaries: list[dict] = []
+
         async def _gen():
             communicate = edge_tts.Communicate(sentence, self._voice, rate=self._rate)
-            await communicate.save(tmp.name)
+            audio = bytearray()
+            async for event in communicate.stream():
+                if event["type"] == "audio":
+                    audio.extend(event["data"])
+                elif event["type"] == "WordBoundary":
+                    word_boundaries.append({
+                        "offset_ms":   event["offset"]   // 10_000,
+                        "duration_ms": event["duration"] // 10_000,
+                        "text":        event["text"],
+                        "text_offset": event["text_offset"],
+                        "word_length": event["word_length"],
+                    })
+            with open(tmp.name, "wb") as fout:
+                fout.write(bytes(audio))
 
         try:
             asyncio.run(_gen())
-            return tmp.name
+            return tmp.name, word_boundaries
         except Exception as exc:
             self.error_occurred.emit(f"EdgeTTS error: {exc}")
             try:
                 os.remove(tmp.name)
             except Exception:
                 pass
-            return None
+            return None, []
 
     # ── Combine sentence MP3s into one session file ───────────────────────────
 
@@ -398,6 +470,7 @@ class TTSEngine:
               on_preparing=None, on_start=None,
               on_finish=None, on_error=None,
               on_paused=None, on_resumed=None,
+              on_word_highlight=None,
               session_path: str | None = None):
         self.stop()
 
@@ -412,12 +485,14 @@ class TTSEngine:
         else:
             worker = Pyttsx3Worker(text, self._rate, self._volume, self._voice_id)
 
-        if on_preparing: worker.preparing_speech.connect(on_preparing)
-        if on_start:     worker.started_speaking.connect(on_start)
-        if on_finish:    worker.finished_speaking.connect(on_finish)
-        if on_error:     worker.error_occurred.connect(on_error)
-        if on_paused:    worker.paused_speaking.connect(on_paused)
-        if on_resumed:   worker.resumed_speaking.connect(on_resumed)
+        if on_preparing:      worker.preparing_speech.connect(on_preparing)
+        if on_start:          worker.started_speaking.connect(on_start)
+        if on_finish:         worker.finished_speaking.connect(on_finish)
+        if on_error:          worker.error_occurred.connect(on_error)
+        if on_paused:         worker.paused_speaking.connect(on_paused)
+        if on_resumed:        worker.resumed_speaking.connect(on_resumed)
+        if on_word_highlight and isinstance(worker, EdgeTTSWorker):
+            worker.word_highlight.connect(on_word_highlight)
 
         self._worker = worker
         worker.start()
