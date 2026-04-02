@@ -1,0 +1,36 @@
+{
+  "app.name":                  "Veaja",
+  "app.ready":                 "Veaja is ready",
+  "app.tap_to_read":           "Tap to read",
+  "app.select_text":           "Select text to read\u2026",
+
+  "tts.processing":            "Processing\u2026",
+  "tts.speaking":              "Speaking\u2026  \u25a0 click to stop",
+  "tts.paused":                "Paused  \u25b6 click to resume",
+
+  "error.no_english":          "No English text found in selection.",
+  "error.mixed_language":      "Mixed language detected. Reading English portions only.",
+  "error.tts_failed":          "TTS error — please try again.",
+  "error.network":             "Network error. Switch to Offline mode.",
+  "error.empty_text":          "Please select or type some text first.",
+
+  "lang.unsupported":          "{lang} is not yet supported. Reading English portions.",
+  "lang.none_found":           "No readable text found in selection.",
+
+  "btn.read":                  "\u25b6  Read",
+  "btn.pause":                 "\u23f8  Pause",
+  "btn.resume":                "\u25b6  Resume",
+  "btn.stop":                  "\u25a0  Stop",
+  "btn.processing":            "\u231b Processing\u2026",
+
+  "profile.edit":              "Edit Profile",
+  "profile.display_name":      "Display name",
+  "profile.choose_image":      "Choose image\u2026",
+  "profile.reset_default":     "Reset to default",
+  "profile.highlight_colour":  "Word highlight colour",
+  "profile.save":              "Save",
+  "profile.cancel":            "Cancel",
+
+  "tour.welcome.title":        "Welcome to Veaja!",
+  "tour.done.title":           "You\u2019re all set!"
+}
