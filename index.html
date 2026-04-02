@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Veaja</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="light">
+
+  <!-- ── Splash Screen ── -->
+  <div id="splash" class="splash">
+    <img id="splashLogo" src="assets/logo_light.png" alt="Veaja Logo" class="splash-logo">
+    <p class="splash-name">Veaja</p>
+  </div>
+
+  <!-- ── Main Application ── -->
+  <div id="mainApp" class="main-app hidden">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+        <span id="themeIcon">☾</span>
+      </button>
+
+      <div class="profile-section">
+        <div class="profile-img-box">
+          <img id="sidebarLogo" src="assets/logo_light.png" alt="Profile">
+        </div>
+        <div class="profile-name-row">
+          <span class="profile-name">Veaja</span>
+          <span class="sidebar-edit-icon" onclick="navigate('edit-profile')" title="Edit profile">✎</span>
+        </div>
+      </div>
+
+      <button class="dashboard-btn" onclick="navigate('dashboard')">Dashboard</button>
+
+      <nav class="sidebar-nav">
+        <a class="nav-link" data-page="settings" onclick="navigate('settings')">Voice Setting</a>
+        <a class="nav-link" data-page="history" onclick="navigate('history')">View History</a>
+      </nav>
+
+      <div class="help-section">
+        <p class="help-label">Help</p>
+        <div class="help-links">
+          <a class="help-link" data-page="tutorial" onclick="navigate('tutorial')">
+            <span class="help-icon">📖</span> Tutorial
+          </a>
+          <a class="help-link" data-page="ask" onclick="navigate('ask')">
+            <span class="help-icon">💬</span> Ask a Question
+          </a>
+          <a class="help-link" data-page="privacy" onclick="navigate('privacy')">
+            <span class="help-icon">🛡</span> Data Privacy
+          </a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Content Area -->
+    <main class="content">
+
+      <!-- ── Dashboard ── -->
+      <div id="page-dashboard" class="page active">
+        <p class="page-title">Veaja Feature</p>
+
+        <div class="tab-bar">
+          <button class="tab active" onclick="switchTab(this,'overlay')">Overlay</button>
+          <button class="tab" onclick="switchTab(this,'text-label')">Text label</button>
+        </div>
+
+        <!-- Overlay pane -->
+        <div id="tab-overlay" class="tab-pane active">
+          <div class="overlay-box">
+            <p class="body-text">
+              I have observed this skewed income distribution in my own experience
+              from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds
+              of freelancers, and (3) as a course creator offering Python freelancing
+              education. Most students fail to reach even the average earning potential
+              because they don't stay in the game for more than a month or so. The ones
+              who keep working on their freelancing business daily for several months
+              usually reach the average $51 per hour earning target. A minority of very
+              ambitious and dedicated students reach $100 per hour and more.
+              But why do some students fail while others thrive? Let's plot the number
+              of successful gigs completed by freelance developers on the Fiverr platform
+              with an average rating of at least 4 out of 5. I focused on the popular
+              area of machine learning in Figure 2-11. I collected the data from the Fiverr
+              website and tracked the number of completed gigs for 71 freelancers on the
+              two top search results for the category Machine Learning Gigs. Not surprisingly,
+              for us, the distribution resembles a Pareto distribution.
+            </p>
+
+            <!-- Floating overlay widget -->
+            <div class="floating-widget">
+              <img class="widget-logo" id="widgetLogo" src="assets/logo_light.png" alt="">
+              <span class="widget-text">Tap to read</span>
+              <span class="widget-refresh">↻</span>
+              <div class="widget-speech">
+                Hi, my name is Veaja. I'm an helpful assistant, what do you want me to read for you. I'm here to assist you anytime. And don't mind me if my voice isn't sweet enough, I'm just kidding, but I'm a friendly AI assistance. No matter.
+              </div>
+            </div>
+          </div>
+          <p class="hint-bar">
+            On window: select text and &nbsp;<kbd>Press ctrl + R</kbd>&nbsp; to read<br>
+            or <kbd>ctrl + C</kbd> to pop up overlay
+          </p>
+        </div>
+
+        <!-- Text label pane -->
+        <div id="tab-text-label" class="tab-pane">
+          <div class="text-label-box">
+            <textarea class="text-label-textarea" placeholder="Please enter text here..."></textarea>
+            <div class="text-label-footer">
+              <button class="btn-outline">Read</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Edit Profile ── -->
+      <div id="page-edit-profile" class="page page-edit-profile">
+        <div class="page-top-action">
+          <button class="btn-outline">Save</button>
+        </div>
+        <div class="edit-profile-body">
+          <div class="profile-photo-frame">
+            <img id="editProfileImg" src="assets/logo_light.png" alt="Profile photo">
+          </div>
+          <div class="edit-name-row">
+            <span class="edit-pencil">✎</span>
+            <span class="edit-name-text">Veaja</span>
+          </div>
+          <div class="name-underline"></div>
+          <p class="change-profile-label">Change profile</p>
+          <div class="profile-btns">
+            <button class="btn-outline">upload photo</button>
+            <button class="btn-outline">set default</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Voice Setting ── -->
+      <div id="page-settings" class="page">
+        <div class="page-top-action">
+          <button class="btn-outline">Save</button>
+        </div>
+
+        <!-- Shape -->
+        <section class="settings-section">
+          <p class="settings-label">Shape</p>
+          <div class="shape-box">
+            <button class="shape-expand-btn" title="Expand">⤢</button>
+
+            <div class="shape-row">
+              <label class="checkbox-label"><input type="checkbox" checked> Circle</label>
+              <div class="shape-previews">
+                <div class="shape-preview dark-bg">
+                  <div class="mini-widget circle-widget">
+                    <div class="mini-logo-dot"></div>
+                    <span>Tap to read</span>
+                    <span>↻</span>
+                  </div>
+                  <p class="mini-speech light-speech">Hi, my name is Veaja. I'm an helpful assistant, what do you want me to read for you. I'm here to assist you. And don't mind me if my voice isn't sweet enough, I'm just kidding. I'm friendly AI assistance. No matter.</p>
+                </div>
+                <div class="shape-preview light-bg">
+                  <div class="mini-widget circle-widget light-widget">
+                    <div class="mini-logo-dot dark-dot"></div>
+                    <span>Tap to read</span>
+                    <span>↻</span>
+                  </div>
+                  <p class="mini-speech dark-speech">Hi, my name is Veaja. I'm an helpful assistant, what do you want me to read for you. I'm here to assist you. And don't mind me if my voice isn't sweet enough, I'm just kidding. I'm friendly AI assistance. No matter.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="shape-row">
+              <label class="checkbox-label"><input type="checkbox"> Rectangle</label>
+              <div class="shape-previews">
+                <div class="shape-preview dark-bg">
+                  <div class="mini-widget rect-widget">
+                    <div class="mini-logo-dot"></div>
+                    <span>Tap to read</span>
+                    <span>↻</span>
+                  </div>
+                  <p class="mini-speech light-speech">Hi, my name is Veaja. I'm an helpful assistant, what do you want me to read for you. I'm here to assist you. And don't mind me if my voice isn't sweet enough, I'm just kidding. I'm friendly AI assistance. No matter.</p>
+                </div>
+                <div class="shape-preview light-bg">
+                  <div class="mini-widget rect-widget light-widget">
+                    <div class="mini-logo-dot dark-dot"></div>
+                    <span>Tap to read</span>
+                    <span>↻</span>
+                  </div>
+                  <p class="mini-speech dark-speech">Hi, my name is Veaja. I'm an helpful assistant, what do you want me to read for you. I'm here to assist you. And don't mind me if my voice isn't sweet enough, I'm just kidding. I'm friendly AI assistance. No matter.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Mode & Language -->
+        <div class="settings-row">
+          <div class="settings-col">
+            <p class="settings-label">Mode</p>
+            <div class="mode-options">
+              <label class="checkbox-label"><input type="checkbox" checked> Online Mode</label>
+              <label class="checkbox-label"><input type="checkbox"> Offline Mode</label>
+            </div>
+          </div>
+          <div class="settings-col">
+            <p class="settings-label">Language</p>
+            <div class="inline-action">
+              <button class="btn-outline">English</button>
+              <span class="inline-edit">✎</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sound & Speed -->
+        <div class="settings-row">
+          <div class="settings-col">
+            <p class="settings-label">Sound</p>
+            <div class="inline-action">
+              <input type="text" class="settings-input" value="Alice">
+              <span class="inline-edit">✎</span>
+            </div>
+          </div>
+          <div class="settings-col">
+            <p class="settings-label">Speed</p>
+            <div class="speed-row">
+              <span>🐢</span>
+              <input type="range" class="speed-slider" min="0" max="100" value="50">
+              <span>🐇</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── View History ── -->
+      <div id="page-history" class="page">
+        <div class="page-header">
+          <p class="page-title" style="margin:0">History recall</p>
+          <button class="btn-outline">Clear</button>
+        </div>
+        <div class="history-list">
+
+          <div class="history-card">
+            <button class="history-del" title="Delete">🗑</button>
+            <div class="history-card-header">
+              <span class="history-label">Recent</span>
+              <div class="history-progress"><div class="prog-fill"></div><div class="prog-rest"></div></div>
+              <span class="history-dot">•</span>
+            </div>
+            <p class="history-text">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds of freelancers, and (3) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential</p>
+          </div>
+
+          <div class="history-card">
+            <button class="history-del" title="Delete">🗑</button>
+            <div class="history-card-header">
+              <span class="history-label">Previous</span>
+              <div class="history-progress"><div class="prog-fill"></div><div class="prog-rest"></div></div>
+              <span class="history-dot">•</span>
+            </div>
+            <p class="history-text">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds of freelancers, and (3) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential</p>
+          </div>
+
+          <div class="history-card">
+            <button class="history-del" title="Delete">🗑</button>
+            <div class="history-card-header">
+              <span class="history-label">Old</span>
+              <div class="history-progress"><div class="prog-fill"></div><div class="prog-rest"></div></div>
+              <span class="history-dot">•</span>
+            </div>
+            <p class="history-text">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds of freelancers, and (3) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential</p>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── Ask a Question ── -->
+      <div id="page-ask" class="page">
+        <div class="page-header">
+          <p class="page-title" style="margin:0">General</p>
+          <button class="btn-outline">Email</button>
+        </div>
+        <div class="card-list">
+          <div class="info-card">
+            <p class="card-title">Q1. How to user overlay feature?</p>
+            <p class="card-body">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds of freelancers, and (3) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential</p>
+          </div>
+          <div class="info-card">
+            <p class="card-title">Q1. Do you collect data from us?</p>
+            <p class="card-body">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds of freelancers, and (3) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential</p>
+          </div>
+          <div class="info-card">
+            <p class="card-title">Q1. Can I use this app on mobile phone or tablet?</p>
+            <p class="card-body">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds of freelancers, and (3) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Data Privacy ── -->
+      <div id="page-privacy" class="page">
+        <p class="page-title">Term of use</p>
+        <div class="card-list">
+          <div class="info-card">
+            <p class="card-title">T1. Offline usage:</p>
+            <p class="card-body">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a client hiring hundreds of freelancers, and (3) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential because they don't stay in the game for more than a month or so. The ones who keep working on their freelancing business daily for several months usually reach the average $51 per hour earning target. A minority of very ambitious and dedicated students reach $100 per hour and more. But why do some students fail while others thrive? Let's plot the number of successful gigs completed by freelance developers on the Fiverr platform with an average rating of at least 4 out of 5. I focused on the popular area of machine learning in Figure 2-11. I collected the data from the Fiverr website and tracked the number of completed gigs for 71 freelancers on the two top search results for the category Machine Learning Gigs. Not surprisingly,</p>
+          </div>
+          <div class="info-card">
+            <p class="card-title">T2. Online usage:</p>
+            <p class="card-body">I have observed this skewed income distribution in my own experience from three perspectives: (1) as a freelancer, (2) as a course creator offering Python freelancing education. Most students fail to reach even the average earning potential</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Tutorial ── -->
+      <div id="page-tutorial" class="page">
+        <p class="page-title">Tutorial</p>
+        <div class="card-list">
+          <div class="info-card">
+            <p class="card-title">Getting Started</p>
+            <p class="card-body">Select any text on your screen and press <kbd>Ctrl + R</kbd> to have Veaja read it aloud. Use <kbd>Ctrl + C</kbd> to pop up the overlay widget anywhere on your screen.</p>
+          </div>
+          <div class="info-card">
+            <p class="card-title">Using Text Label</p>
+            <p class="card-body">Navigate to Dashboard → Text label tab. Type or paste your text into the input area, then click the <strong>Read</strong> button to start playback.</p>
+          </div>
+          <div class="info-card">
+            <p class="card-title">Customizing Your Experience</p>
+            <p class="card-body">Visit Voice Setting to choose the overlay shape, select a voice, adjust speed, change language, and switch between Online and Offline mode.</p>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
