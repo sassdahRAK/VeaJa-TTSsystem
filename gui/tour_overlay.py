@@ -1,13 +1,12 @@
 """
-Veaja interactive product tour.
+Veaja interactive live-teach tutorial.
 
-Spawned by AppController when the user clicks the ? button.
-Covers the MainWindow with a semi-transparent overlay and spotlights
-each UI element one step at a time.
+Spawned by AppController when the user clicks Tutorial in the sidebar.
+Covers the MainWindow with a semi-transparent spotlight overlay and
+navigates to the relevant page before spotlighting each widget.
 
-Usage:
-    tour = TourOverlay(main_window)
-    tour.show()
+Steps that have navigate_to/tab will call main_window.navigate_if_needed()
+so the user sees the feature being demonstrated in context (live-teach).
 """
 
 from PyQt6.QtWidgets import QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout
@@ -16,75 +15,80 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 
 
 # ── Tour step definitions ──────────────────────────────────────────────────────
+# navigate_to: content-stack page index to switch to before showing spotlight
+#   0 = Dashboard, 1 = Setting, 2 = View History, 3 = Ask, 4 = Privacy
+# tab: dashboard tab index (0 = Overlay, 1 = Text label) — used when navigate_to == 0
 
 STEPS = [
     {
         "widget_attr": None,
         "title": "Welcome to Veaja!",
         "body": (
-            "This quick tour walks you through every feature.\n\n"
-            "Use  Next  and  Back  to navigate, or  Skip  to close."
+            "This live tutorial walks you through every feature.\n\n"
+            "Use  Next  and  Back  to navigate, or  Skip  to close.\n\n"
+            "Each step jumps to the relevant page so you can see\n"
+            "the feature in context — live!"
         ),
+        "navigate_to": None,
     },
 
-    # ── Reading from PDFs, Word, browsers ─────────────────────────────────────
+    # ── Reading workflow ───────────────────────────────────────────────────────
     {
         "widget_attr": None,
         "title": "Reading in PDF / Word / Browser",
         "body": (
-            "Veaja cannot highlight text inside other apps — that is a\n"
-            "system limitation on Windows.\n\n"
-            "Here is the workflow:\n"
+            "Veaja reads text from any application:\n\n"
             "1. Select text in your PDF / Word / browser\n"
-            "2. Press  Ctrl+R  — Veaja copies and reads it immediately\n"
-            "   (or use  Ctrl+C  and the overlay appears automatically)\n"
-            "3. Watch the floating pill — it shows the current\n"
-            "   word in yellow (karaoke mode) so you can follow along\n"
-            "   without switching windows"
+            "2. Press  Ctrl+R  — Veaja reads it immediately\n"
+            "   (or  Ctrl+C  — the overlay pill appears automatically)\n"
+            "3. The floating pill tracks each word in yellow so you\n"
+            "   can follow along without switching windows."
         ),
-    },
-    {
-        "widget_attr": None,
-        "title": "Overlay Karaoke — Live Word Tracker",
-        "body": (
-            "While Veaja speaks, the floating pill shows the current\n"
-            "word highlighted in yellow inside the pill itself.\n\n"
-            "You can keep your PDF or Word doc in focus — just glance\n"
-            "at the pill to see where the reading is up to.\n\n"
-            "Click  ⟳  on the pill to restart from the beginning."
-        ),
+        "navigate_to": 0,
+        "tab": 0,
     },
 
-    # ── Dashboard features ─────────────────────────────────────────────────────
+    # ── Overlay tab ────────────────────────────────────────────────────────────
+    {
+        "widget_attr": "_overlay_text_view",
+        "title": "Overlay Tab — Live Preview",
+        "body": (
+            "The Overlay tab shows the text currently loaded\n"
+            "from your clipboard or selection.\n\n"
+            "When Veaja reads, words are highlighted in yellow\n"
+            "in the floating pill overlay above all windows."
+        ),
+        "navigate_to": 0,
+        "tab": 0,
+    },
+
+    # ── Text label tab ─────────────────────────────────────────────────────────
     {
         "widget_attr": "_text_edit",
-        "title": "Text Input (Dashboard)",
+        "title": "Text Label Tab — Type or Paste",
         "body": (
             "Type or paste text here, then click Read.\n\n"
             "While reading, each word is highlighted in yellow from\n"
-            "left to right — a progress bar for your eyes.\n\n"
-            "Tip: paste long articles here for the best\n"
-            "highlighting experience."
+            "left to right — a visual progress bar for your eyes.\n\n"
+            "Tip: paste long articles here for the best experience."
         ),
+        "navigate_to": 0,
+        "tab": 1,
     },
     {
         "widget_attr": "_read_btn",
         "title": "Read Button",
         "body": (
             "Click Read to start speaking.\n\n"
-            "• Click again → Pause  (button turns orange)\n"
+            "• Click again while speaking → Pause\n"
             "• Click once more → Resume\n"
-            "• Button is red while speaking."
+            "• Button turns red while speaking, orange while paused."
         ),
+        "navigate_to": 0,
+        "tab": 1,
     },
-    {
-        "widget_attr": "_stop_btn",
-        "title": "Stop Button",
-        "body": (
-            "Immediately stops reading and clears the highlight.\n\n"
-            "Tip: while paused, Stop discards your position."
-        ),
-    },
+
+    # ── Settings page ──────────────────────────────────────────────────────────
     {
         "widget_attr": "_online_btn",
         "title": "Online / Offline Mode",
@@ -92,8 +96,10 @@ STEPS = [
             "Online  — Microsoft neural voices.\n"
             "High-quality, human-like. Requires internet.\n\n"
             "Offline — Windows system voices.\n"
-            "Works without internet. More robotic."
+            "Works without internet. More robotic.\n\n"
+            "Switch here in Settings."
         ),
+        "navigate_to": 1,
     },
     {
         "widget_attr": "_voice_combo",
@@ -103,6 +109,7 @@ STEPS = [
             "Online voices include regional accents:\n"
             "US, UK, and Australian English."
         ),
+        "navigate_to": 1,
     },
     {
         "widget_attr": "_speed_slider",
@@ -112,62 +119,78 @@ STEPS = [
             "Range: 50 (slow) → 400 (fast).\n"
             "Default 175 is a natural reading pace."
         ),
+        "navigate_to": 1,
     },
-    {
-        "widget_attr": "_vol_slider",
-        "title": "Volume",
-        "body": "Adjust the TTS playback volume from 0 % to 100 %.",
-    },
+
+    # ── History page ───────────────────────────────────────────────────────────
     {
         "widget_attr": "_history_list",
         "title": "Reading History",
         "body": (
             "Your last 20 texts are saved here.\n\n"
+            "History is split into Recent, Previous, and Old sections.\n\n"
             "Double-click any item to load it back into the text box."
         ),
+        "navigate_to": 2,
     },
-    {
-        "widget_attr": "_history_list",
-        "title": "Reading History",
-        "body": (
-            "Your last 20 texts are saved here.\n\n"
-            "Double-click any item to reload it — great for re-reading\n"
-            "a passage from a PDF you had open earlier."
-        ),
-    },
+
+    # ── Profile ────────────────────────────────────────────────────────────────
     {
         "widget_attr": "_header_logo",
         "title": "Your Profile",
         "body": (
-            "Click the avatar or the app name to open your profile.\n\n"
+            "Click the avatar or app name in the sidebar to open profile.\n\n"
             "• Set a custom display name\n"
             "• Set a profile picture (shown in the overlay pill)\n"
             "• Choose your word-highlight colour"
         ),
+        "navigate_to": None,
     },
+
+    # ── Ask a Question ─────────────────────────────────────────────────────────
+    {
+        "widget_attr": None,
+        "title": "Ask a Question",
+        "body": (
+            "Find answers to common questions in the\n"
+            "Ask a Question section.\n\n"
+            "Topics include: overlay usage, data privacy,\n"
+            "and platform availability.\n\n"
+            "Use the Email button to contact support."
+        ),
+        "navigate_to": 3,
+    },
+
+    # ── Dark / light mode ──────────────────────────────────────────────────────
     {
         "widget_attr": "_theme_btn",
         "title": "Dark / Light Mode",
         "body": (
-            "Toggle between dark and light themes.\n\n"
+            "Toggle between dark and light themes using the\n"
+            "☀ / ☾ button at the top of the sidebar.\n\n"
             "The floating overlay and tray icon both\n"
             "follow this setting automatically."
         ),
+        "navigate_to": None,
     },
+
+    # ── Word highlighting ──────────────────────────────────────────────────────
     {
         "widget_attr": None,
         "title": "Word Highlighting — Two Modes",
         "body": (
             "Veaja highlights words in two places simultaneously:\n\n"
-            "1.  Dashboard text box  — yellow progress bar left-to-right.\n"
+            "1.  Dashboard Text tab  — yellow progress bar left-to-right.\n"
             "    Best when you paste text directly into Veaja.\n\n"
             "2.  Overlay pill  — karaoke display shows the current word\n"
-            "    in the pill itself, in yellow.\n"
-            "    Use this when reading a PDF, Word, or browser page\n"
+            "    in yellow. Use this when reading PDFs or browser pages\n"
             "    so you never need to switch windows.\n\n"
-            "Customise the colour in Profile → Highlight colour."
+            "Customise the highlight colour in your Profile."
         ),
+        "navigate_to": None,
     },
+
+    # ── Wrap-up ────────────────────────────────────────────────────────────────
     {
         "widget_attr": None,
         "title": "You're all set!",
@@ -179,14 +202,15 @@ STEPS = [
             "4. Watch the overlay pill — it tracks every word in yellow\n\n"
             "Enjoy Veaja!"
         ),
+        "navigate_to": None,
     },
 ]
 
 
-# ── Bubble widget ─────────────────────────────────────────────────────────────
+# ── Bubble widget ──────────────────────────────────────────────────────────────
 
 class _Bubble(QWidget):
-    """Floating rounded-rect card with title, body, and Prev/Next/Skip."""
+    """Floating rounded card with title, body, and Prev / Next / Skip."""
 
     def __init__(self, on_prev, on_next, on_skip, parent=None):
         super().__init__(parent)
@@ -199,7 +223,6 @@ class _Bubble(QWidget):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(8)
 
-        # Step indicator
         self._step_label = QLabel()
         self._step_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         f = QFont()
@@ -207,7 +230,6 @@ class _Bubble(QWidget):
         self._step_label.setFont(f)
         layout.addWidget(self._step_label)
 
-        # Title
         self._title = QLabel()
         title_font = QFont()
         title_font.setPointSize(13)
@@ -216,7 +238,6 @@ class _Bubble(QWidget):
         self._title.setWordWrap(True)
         layout.addWidget(self._title)
 
-        # Body
         self._body = QLabel()
         body_font = QFont()
         body_font.setPointSize(10)
@@ -226,7 +247,6 @@ class _Bubble(QWidget):
 
         layout.addSpacing(8)
 
-        # Button row
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
@@ -260,7 +280,6 @@ class _Bubble(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Detect dark mode: low lightness → dark background
         is_dark = self.palette().color(self.backgroundRole()).lightness() < 128
         if is_dark:
             bg     = QColor(30, 30, 32, 250)
@@ -271,27 +290,23 @@ class _Bubble(QWidget):
             text   = QColor(28, 28, 30)
             border = QColor(210, 210, 215, 200)
 
-        # Set text colours dynamically
         self._title.setStyleSheet(f"color: {text.name()};")
-        self._body.setStyleSheet(f"color: {text.name()}; opacity: 0.85;")
-        self._step_label.setStyleSheet(f"color: {text.name()}; opacity: 0.5;")
+        self._body.setStyleSheet(f"color: {text.name()};")
+        self._step_label.setStyleSheet(f"color: {text.name()};")
 
         rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1.0))
         painter.drawRoundedRect(rect, 14, 14)
-
-        # Drop shadow hint via border
         painter.setPen(Qt.PenStyle.NoPen)
 
 
-# ── Main overlay ──────────────────────────────────────────────────────────────
+# ── Main overlay ───────────────────────────────────────────────────────────────
 
 class TourOverlay(QWidget):
     """
-    Full-window semi-transparent overlay.
-    Draws a spotlight (clear hole) over the current target widget,
-    and shows a _Bubble near that spotlight.
+    Full-window semi-transparent overlay with spotlight + bubble.
+    Live-teaches by navigating to the relevant page before spotlighting.
     """
 
     def __init__(self, main_window: QWidget):
@@ -315,7 +330,7 @@ class TourOverlay(QWidget):
         self._main.installEventFilter(self)
         self._go_to(0)
 
-    # ── Navigation ────────────────────────────────────────────────────────────
+    # ── Navigation ─────────────────────────────────────────────────────────────
 
     def _prev(self):
         if self._step > 0:
@@ -330,25 +345,30 @@ class TourOverlay(QWidget):
     def _go_to(self, idx: int):
         self._step = idx
         step = self._steps[idx]
+
+        # Live-teach: navigate to the relevant page first
+        navigate_to = step.get("navigate_to")
+        if navigate_to is not None and hasattr(self._main, "navigate_if_needed"):
+            tab = step.get("tab")
+            self._main.navigate_if_needed(navigate_to, tab=tab)
+
         self._bubble.update_content(idx, len(self._steps), step["title"], step["body"])
         self._position_bubble(step.get("widget_attr"))
-        self.update()   # repaint overlay (spotlight position)
+        self.update()
 
-    # ── Spotlight target ──────────────────────────────────────────────────────
+    # ── Spotlight ──────────────────────────────────────────────────────────────
 
     def _target_rect(self, widget_attr: str | None) -> QRect | None:
-        """Return the rect of the target widget in overlay-local coordinates."""
         if not widget_attr:
             return None
         target: QWidget | None = getattr(self._main, widget_attr, None)
-        if target is None:
+        if target is None or not target.isVisible():
             return None
-        # Map target's global top-left into this overlay's coordinate space
         global_pos = target.mapToGlobal(QPoint(0, 0))
         local_pos  = self.mapFromGlobal(global_pos)
         return QRect(local_pos, target.size()).adjusted(-10, -8, 10, 8)
 
-    # ── Bubble positioning ────────────────────────────────────────────────────
+    # ── Bubble positioning ─────────────────────────────────────────────────────
 
     def _position_bubble(self, widget_attr: str | None):
         self._bubble.adjustSize()
@@ -360,11 +380,9 @@ class TourOverlay(QWidget):
         spot = self._target_rect(widget_attr)
 
         if spot is None:
-            # Centre the bubble
             x = (ow - bw) // 2
             y = (oh - bh) // 2
         else:
-            # Prefer below the spotlight; fall back to above
             gap = 16
             x = spot.left()
             y = spot.bottom() + gap
@@ -372,13 +390,12 @@ class TourOverlay(QWidget):
                 y = spot.top() - bh - gap
             if y < 20:
                 y = spot.bottom() + gap
-            # Clamp horizontally
             x = max(12, min(x, ow - bw - 12))
             y = max(12, min(y, oh - bh - 12))
 
         self._bubble.move(x, y)
 
-    # ── Painting — overlay + spotlight ───────────────────────────────────────
+    # ── Painting ───────────────────────────────────────────────────────────────
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -386,43 +403,28 @@ class TourOverlay(QWidget):
 
         step = self._steps[self._step]
         spot = self._target_rect(step.get("widget_attr"))
+        dim  = QColor(0, 0, 0, 160)
 
-        # Dim background
-        dim = QColor(0, 0, 0, 160)
+        painter.fillRect(self.rect(), dim)
 
-        if spot is None:
-            painter.fillRect(self.rect(), dim)
-        else:
-            # Fill everything with dim colour
-            painter.fillRect(self.rect(), dim)
-
-            # Cut out the spotlight using CompositionMode_Clear
-            painter.setCompositionMode(
-                QPainter.CompositionMode.CompositionMode_Clear
-            )
+        if spot is not None:
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
             path = QPainterPath()
             path.addRoundedRect(QRectF(spot), 10, 10)
             painter.fillPath(path, QBrush(Qt.GlobalColor.transparent))
 
-            # Draw accent border around spotlight
-            painter.setCompositionMode(
-                QPainter.CompositionMode.CompositionMode_SourceOver
-            )
-            accent = QColor(10, 132, 255, 200)   # blue accent
-            painter.setPen(QPen(accent, 2.0))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.setPen(QPen(QColor(10, 132, 255, 200), 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(QRectF(spot), 10, 10)
 
-    # ── Intercept clicks outside the bubble to prevent accidental interaction ─
+    # ── Event handling ─────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event):
-        # Allow clicks through to the bubble; block everything else.
         if not self._bubble.geometry().contains(event.position().toPoint()):
-            event.accept()   # swallow the click
+            event.accept()
         else:
             super().mousePressEvent(event)
-
-    # ── Track parent resize via event filter ─────────────────────────────────
 
     def eventFilter(self, obj, event):
         if obj is self._main and event.type() == QEvent.Type.Resize:
@@ -439,29 +441,24 @@ class TourOverlay(QWidget):
         self.resize(self._main.size())
         self.raise_()
 
-    # ── Button styling ────────────────────────────────────────────────────────
+    # ── Button styling ─────────────────────────────────────────────────────────
 
     def _style_buttons(self):
-        base = (
-            "QPushButton { border-radius: 8px; font-size: 12px; padding: 0 12px; }"
-        )
-        next_style = (
+        base = "QPushButton { border-radius: 8px; font-size: 12px; padding: 0 12px; }"
+        self._bubble._next_btn.setStyleSheet(
             f"{base}"
             "QPushButton { background: #0A84FF; color: #fff; border: none; }"
             "QPushButton:hover { background: #339AF0; }"
         )
-        prev_style = (
+        self._bubble._prev_btn.setStyleSheet(
             f"{base}"
-            "QPushButton { background: transparent; color: #0A84FF; "
-            "border: 1px solid #0A84FF; }"
+            "QPushButton { background: transparent; color: #0A84FF;"
+            " border: 1px solid #0A84FF; }"
             "QPushButton:hover { background: rgba(10,132,255,0.12); }"
             "QPushButton:disabled { color: #555; border-color: #555; }"
         )
-        skip_style = (
+        self._bubble._skip_btn.setStyleSheet(
             f"{base}"
             "QPushButton { background: transparent; color: #888; border: none; }"
             "QPushButton:hover { color: #ccc; }"
         )
-        self._bubble._next_btn.setStyleSheet(next_style)
-        self._bubble._prev_btn.setStyleSheet(prev_style)
-        self._bubble._skip_btn.setStyleSheet(skip_style)
