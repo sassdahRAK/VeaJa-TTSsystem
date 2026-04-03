@@ -13,9 +13,10 @@ from gui.icon_utils import svg_pixmap, svg_icon
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QStackedLayout,
     QLabel, QPushButton, QTextEdit, QSlider, QComboBox, QLineEdit,
-    QFrame, QScrollArea, QCheckBox, QSizePolicy, QListWidget, QListWidgetItem
+    QFrame, QScrollArea, QCheckBox, QSizePolicy, QListWidget, QListWidgetItem,
+    QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import (
     QPalette, QColor, QPixmap, QFont,
     QPainter, QPainterPath, QTextCursor, QTextCharFormat, QBrush
@@ -72,8 +73,9 @@ QPushButton#themeBtn {
     border-radius: 4px;
 }
 QPushButton#themeBtn:hover { background: rgba(255,255,255,0.1); color: #ffffff; }
-QLabel#helpLabel { color: #888888; font-size: 12px; }
-QLabel#editIcon  { color: #aaaaaa; font-size: 13px; background: transparent; }
+QLabel#profileName { color: #ffffff; font-size: 15px; font-weight: 600; background: transparent; }
+QLabel#helpLabel   { color: #cccccc; font-size: 13px; font-weight: 600; background: transparent; }
+QLabel#editIcon    { color: #aaaaaa; font-size: 13px; background: transparent; }
 """
 
 # ── Sidebar QSS — DARK mode (sidebar is light) ────────────────────────────────
@@ -122,8 +124,9 @@ QPushButton#themeBtn {
     border-radius: 4px;
 }
 QPushButton#themeBtn:hover { background: rgba(0,0,0,0.07); color: #1a1a1a; }
-QLabel#helpLabel { color: #666666; font-size: 12px; }
-QLabel#editIcon  { color: #888888; font-size: 13px; background: transparent; }
+QLabel#profileName { color: #1a1a1a; font-size: 15px; font-weight: 600; background: transparent; }
+QLabel#helpLabel   { color: #555555; font-size: 13px; font-weight: 600; background: transparent; }
+QLabel#editIcon    { color: #888888; font-size: 13px; background: transparent; }
 """
 
 
@@ -144,29 +147,44 @@ def _is_dark_mode() -> bool:
 
 
 def _make_square_pixmap(path: str, size: int) -> QPixmap | None:
-    """Scale image to fill a square of the given size."""
+    """Scale image to fill a logical square of `size` px, HiDPI-aware.
+    SVG files are rendered via svg_pixmap_raw for crisp vector output."""
+    if path.lower().endswith(".svg"):
+        from gui.icon_utils import svg_pixmap_raw
+        return svg_pixmap_raw(path, size)
     raw = QPixmap(path)
     if raw.isNull():
         return None
-    return raw.scaled(size, size,
-                      Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                      Qt.TransformationMode.SmoothTransformation)
+    # Render at physical resolution so Retina screens stay sharp
+    try:
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        dpr = app.primaryScreen().devicePixelRatio() if app and app.primaryScreen() else 1.0
+    except Exception:
+        dpr = 1.0
+    phys = int(size * dpr)
+    px = raw.scaled(phys, phys,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation)
+    px.setDevicePixelRatio(dpr)
+    return px
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 class MainWindow(QMainWindow):
 
     # ── Signals ────────────────────────────────────────────────────────────────
-    read_requested    = pyqtSignal(str)
-    pause_requested   = pyqtSignal()
-    resume_requested  = pyqtSignal()
-    stop_requested    = pyqtSignal()
-    quit_requested    = pyqtSignal()
-    theme_changed     = pyqtSignal(bool)   # True = dark
-    terms_requested   = pyqtSignal()
-    profile_requested = pyqtSignal()
-    mode_changed      = pyqtSignal(bool)   # True = online
-    tour_requested    = pyqtSignal()
+    read_requested        = pyqtSignal(str)
+    pause_requested       = pyqtSignal()
+    resume_requested      = pyqtSignal()
+    stop_requested        = pyqtSignal()
+    quit_requested        = pyqtSignal()
+    theme_changed         = pyqtSignal(bool)   # True = dark
+    terms_requested       = pyqtSignal()
+    profile_requested     = pyqtSignal()
+    profile_save_requested = pyqtSignal(dict)  # emitted when user saves profile page
+    mode_changed          = pyqtSignal(bool)   # True = online
+    tour_requested        = pyqtSignal()
 
     def __init__(self, tts_engine=None):
         super().__init__()
@@ -184,6 +202,8 @@ class MainWindow(QMainWindow):
         # References set during build — needed by _apply_sidebar_theme
         self._sidebar_widget: QWidget  = None
         self._profile_frame: QWidget   = None
+        self._profile_photo_frame: QWidget | None = None  # large frame on profile page
+        self._pending_profile: dict    = {}               # working copy while editing
 
         # SVG icon labels/buttons — set during _build_sidebar, recolored in theme
         self._edit_icon_lbl: QLabel | None    = None
@@ -221,6 +241,7 @@ class MainWindow(QMainWindow):
         self._content_stack.addWidget(self._build_ask_page())        # 3
         self._content_stack.addWidget(self._build_privacy_page())    # 4
         self._content_stack.addWidget(self._build_tutorial_page())   # 5
+        self._content_stack.addWidget(self._build_profile_page())    # 6
         root.addWidget(self._content_stack, 1)
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
@@ -252,6 +273,7 @@ class MainWindow(QMainWindow):
 
         # Square photo box
         self._profile_frame = QWidget()
+        self._profile_frame.setObjectName("profileFrame")
         self._profile_frame.setFixedSize(82, 82)
         pf_lay = QVBoxLayout(self._profile_frame)
         pf_lay.setContentsMargins(0, 0, 0, 0)
@@ -261,7 +283,7 @@ class MainWindow(QMainWindow):
         self._header_logo.setScaledContents(True)
         self._header_logo.setCursor(Qt.CursorShape.PointingHandCursor)
         self._header_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._header_logo.mousePressEvent = lambda _: self.profile_requested.emit()
+        self._header_logo.mousePressEvent = lambda _: self._open_profile_page()
         pf_lay.addWidget(self._header_logo, 0, Qt.AlignmentFlag.AlignCenter)
         self._reload_header_logo()
 
@@ -271,24 +293,27 @@ class MainWindow(QMainWindow):
         photo_row.addStretch()
         profile_sec.addLayout(photo_row)
 
-        # Name + edit icon
+        # Name + edit icon — both aligned to vertical centre
         name_row = QHBoxLayout()
         name_row.setSpacing(6)
+        name_row.setContentsMargins(0, 0, 0, 0)
         name_row.addStretch()
         self._title_label = QLabel("Veaja")
         self._title_label.setObjectName("profileName")
         self._title_label.setFont(QFont("Segoe UI", 13, QFont.Weight.Medium))
+        self._title_label.setFixedHeight(22)
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self._title_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._title_label.mousePressEvent = lambda _: self.profile_requested.emit()
-        name_row.addWidget(self._title_label)
+        self._title_label.mousePressEvent = lambda _: self._open_profile_page()
+        name_row.addWidget(self._title_label, 0, Qt.AlignmentFlag.AlignVCenter)
         edit_ic = QLabel()
         edit_ic.setObjectName("editIcon")
-        edit_ic.setFixedSize(14, 14)
+        edit_ic.setFixedSize(16, 16)
         edit_ic.setScaledContents(True)
         edit_ic.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_ic.mousePressEvent = lambda _: self.profile_requested.emit()
+        edit_ic.mousePressEvent = lambda _: self._open_profile_page()
         self._edit_icon_lbl = edit_ic
-        name_row.addWidget(edit_ic)
+        name_row.addWidget(edit_ic, 0, Qt.AlignmentFlag.AlignVCenter)
         name_row.addStretch()
         profile_sec.addLayout(name_row)
 
@@ -312,13 +337,23 @@ class MainWindow(QMainWindow):
         nav_col.addWidget(self._nav_link("View History",  2))
         outer.addLayout(nav_col)
 
-        outer.addStretch()
+        # Push help section toward bottom but cap so it never creates a huge gap
+        outer.addSpacing(24)
+        outer.addStretch(1)
+
+        # ── Separator before Help ──────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        outer.addWidget(sep)
+        outer.addSpacing(10)
 
         # ── Help section ──────────────────────────────────────────────────
         help_lbl = QLabel("Help")
         help_lbl.setObjectName("helpLabel")
-        outer.addWidget(help_lbl)
-        outer.addSpacing(12)
+        help_lbl.setFixedHeight(22)
+        help_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        outer.addWidget(help_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+        outer.addSpacing(10)
 
         help_col = QVBoxLayout()
         help_col.setSpacing(12)
@@ -329,6 +364,7 @@ class MainWindow(QMainWindow):
         help_col.addWidget(self._ask_btn)
         help_col.addWidget(self._privacy_btn)
         outer.addLayout(help_col)
+        outer.addSpacing(8)
 
         return sb
 
@@ -345,6 +381,9 @@ class MainWindow(QMainWindow):
         self._content_stack.setCurrentIndex(page_idx)
         for btn, idx in self._nav_btns:
             btn.setChecked(idx == page_idx)
+        # Show edit icon only when NOT on the profile page (index 6)
+        if self._edit_icon_lbl is not None:
+            self._edit_icon_lbl.setVisible(page_idx != 6)
 
     def navigate_if_needed(self, page_idx: int, tab: int | None = None):
         """Used by TourOverlay for live-teach navigation."""
@@ -544,18 +583,10 @@ class MainWindow(QMainWindow):
         # Clear button
         clear_btn = QPushButton("Clear")
         clear_btn.setObjectName("btnOutline")
-        clear_btn.setFixedSize(60, 30)
+        clear_btn.setFixedSize(80, 30)
         clear_btn.setToolTip("Clear text")
         clear_btn.clicked.connect(self._text_edit.clear)
         ft_lay.addWidget(clear_btn)
-
-        # Stop button (visible, enabled only while speaking/paused)
-        self._stop_btn = QPushButton("■  Stop")
-        self._stop_btn.setObjectName("stopBtn")
-        self._stop_btn.setFixedSize(72, 30)
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self._on_stop_clicked)
-        ft_lay.addWidget(self._stop_btn)
 
         # Read / Pause / Resume button
         self._read_btn = QPushButton("Read")
@@ -573,6 +604,215 @@ class MainWindow(QMainWindow):
         words = len(text.split()) if text.strip() else 0
         chars = len(text)
         self._text_counter.setText(f"{words} word{'s' if words != 1 else ''} · {chars} char{'s' if chars != 1 else ''}")
+
+    # ── Profile page (replaces popup dialog) ───────────────────────────────────
+
+    def _build_profile_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("contentPage")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        # Top bar: Save button
+        top = QWidget()
+        top.setObjectName("pageTopAction")
+        t_lay = QHBoxLayout(top)
+        t_lay.setContentsMargins(32, 20, 32, 16)
+        t_lay.addStretch()
+        self._profile_save_btn = QPushButton("Save")
+        self._profile_save_btn.setObjectName("btnOutline")
+        self._profile_save_btn.setFixedSize(90, 32)
+        self._profile_save_btn.clicked.connect(self._on_profile_page_save)
+        t_lay.addWidget(self._profile_save_btn)
+        lay.addWidget(top)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        body = QWidget()
+        body.setObjectName("contentPage")
+        b_lay = QVBoxLayout(body)
+        b_lay.setContentsMargins(40, 10, 40, 40)
+        b_lay.setSpacing(0)
+        b_lay.addStretch()
+
+        # Large profile photo with glow border
+        photo_row = QHBoxLayout()
+        photo_row.addStretch()
+        self._profile_photo_frame = QWidget()
+        self._profile_photo_frame.setObjectName("profilePhotoFrame")
+        self._profile_photo_frame.setFixedSize(220, 220)
+        self._profile_photo_frame.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._profile_photo_frame.mousePressEvent = lambda _: self._on_profile_choose_photo()
+        ppf_lay = QVBoxLayout(self._profile_photo_frame)
+        ppf_lay.setContentsMargins(4, 4, 4, 4)
+        self._profile_photo_lbl = QLabel()
+        self._profile_photo_lbl.setFixedSize(212, 212)
+        self._profile_photo_lbl.setScaledContents(True)
+        self._profile_photo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ppf_lay.addWidget(self._profile_photo_lbl, 0, Qt.AlignmentFlag.AlignCenter)
+        photo_row.addWidget(self._profile_photo_frame)
+        photo_row.addStretch()
+        b_lay.addLayout(photo_row)
+        b_lay.addSpacing(18)
+
+        # Name row: pencil icon (left) + name input — matching role model layout
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        name_row.addStretch()
+        pencil_lbl = QLabel("✎")
+        pencil_lbl.setObjectName("profilePageEdit")
+        pencil_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        pencil_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        pencil_lbl.mousePressEvent = lambda _: self._on_profile_choose_photo()
+        name_row.addWidget(pencil_lbl)
+        self._profile_name_edit = QLineEdit()
+        self._profile_name_edit.setObjectName("profileNameEdit")
+        self._profile_name_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._profile_name_edit.setFixedWidth(240)
+        self._profile_name_edit.setFont(QFont("-apple-system", 20, QFont.Weight.Bold))
+        self._profile_name_edit.setFrame(False)
+        self._profile_name_edit.textChanged.connect(self._on_profile_name_preview)
+        name_row.addWidget(self._profile_name_edit)
+        name_row.addStretch()
+        b_lay.addLayout(name_row)
+        b_lay.addSpacing(20)
+
+        # "Change profile" label
+        chg_row = QHBoxLayout()
+        chg_row.addStretch()
+        chg_lbl = QLabel("Change profile")
+        chg_lbl.setObjectName("settingsLabel")
+        chg_row.addWidget(chg_lbl)
+        chg_row.addStretch()
+        b_lay.addLayout(chg_row)
+        b_lay.addSpacing(14)
+
+        # Buttons: upload photo | set default
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+        btn_row.addStretch()
+        upload_btn = QPushButton("upload photo")
+        upload_btn.setObjectName("btnOutline")
+        upload_btn.setFixedHeight(32)
+        upload_btn.clicked.connect(self._on_profile_choose_photo)
+        btn_row.addWidget(upload_btn)
+        default_btn = QPushButton("set default")
+        default_btn.setObjectName("btnOutline")
+        default_btn.setFixedHeight(32)
+        default_btn.clicked.connect(self._on_profile_reset_photo)
+        btn_row.addWidget(default_btn)
+        btn_row.addStretch()
+        b_lay.addLayout(btn_row)
+
+        b_lay.addStretch()
+        scroll.setWidget(body)
+        lay.addWidget(scroll, 1)
+        return page
+
+    def _open_profile_page(self):
+        """Navigate to the inline profile page, seeding it with current profile."""
+        from PyQt6.QtWidgets import QFileDialog  # noqa: F401 (kept for pick)
+        self._pending_profile = dict(self._pending_profile) if self._pending_profile else {}
+        # Snapshot current saved state so "set default" can revert to it
+        self._saved_name = self._title_label.text()
+        self._saved_logo = self._logo_path
+        # Populate fields from live state
+        current_name = self._title_label.text()
+        self._profile_name_edit.setText(current_name)
+        self._reload_profile_page_photo()
+        self._apply_profile_page_glow()
+        for btn, _ in self._nav_btns:
+            btn.setChecked(False)
+        # Hide the sidebar edit icon while on profile page
+        if self._edit_icon_lbl is not None:
+            self._edit_icon_lbl.setVisible(False)
+        self._content_stack.setCurrentIndex(6)
+
+    def _apply_profile_page_glow(self):
+        """Apply theme-aware blur glow to the large profile photo frame and name input."""
+        if not self._profile_photo_frame:
+            return
+        # Dark mode → warm orange glow  |  Light mode → cool purple glow
+        glow_color = QColor("#f5a623") if self._dark else QColor("#7c6fff")
+        bg = "#f0f0f0" if self._dark else "#1a1a1a"
+        # Clean solid border — the visual ring comes from the drop shadow only
+        self._profile_photo_frame.setStyleSheet(
+            f"#profilePhotoFrame {{ background: {bg}; border-radius: 12px; border: none; }}"
+        )
+        shadow = QGraphicsDropShadowEffect(self._profile_photo_frame)
+        shadow.setBlurRadius(32)
+        shadow.setOffset(0, 0)
+        shadow.setColor(glow_color)
+        self._profile_photo_frame.setGraphicsEffect(shadow)
+        # Name input: transparent background matching content page, underline only
+        if hasattr(self, "_profile_name_edit"):
+            txt   = "#ffffff" if self._dark else "#1a1a1a"
+            bg_in = "transparent"
+            uline = "#555555" if self._dark else "#aaaaaa"
+            self._profile_name_edit.setStyleSheet(
+                f"QLineEdit#profileNameEdit {{"
+                f" background: {bg_in}; color: {txt};"
+                f" border: none; border-bottom: 2px solid {uline};"
+                f" font-size: 20px; font-weight: 700; padding-bottom: 2px; }}"
+            )
+
+    def _reload_profile_page_photo(self):
+        if not hasattr(self, "_profile_photo_lbl"):
+            return
+        logo_path = self._pending_profile.get("logo_path") or self._logo_path
+        if logo_path and os.path.exists(logo_path):
+            px = _make_square_pixmap(logo_path, 212)
+        else:
+            src = self._default_logo_path()
+            px = _make_square_pixmap(src, 212) if src else None
+        if px:
+            self._profile_photo_lbl.setPixmap(px)
+
+    def _on_profile_choose_photo(self):
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose Avatar Image", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
+        )
+        if path:
+            self._pending_profile["logo_path"] = path
+            self._reload_profile_page_photo()
+            self._reload_header_logo(path)   # live preview in sidebar
+
+    def _on_profile_reset_photo(self):
+        """Reset to factory defaults: name 'Veaja', built-in logo, no custom photo."""
+        default_name = "Veaja"
+        self._pending_profile["logo_path"] = None
+        self._pending_profile["app_name"]  = default_name
+        # Must explicitly clear stored path — _reload_header_logo(None) skips updating it
+        self._logo_path = None
+        # Restore profile page fields
+        self._profile_name_edit.setText(default_name)
+        self._reload_profile_page_photo()
+        # Restore sidebar live preview to factory default
+        self._title_label.setText(default_name)
+        self._reload_header_logo()   # no arg → picks up self._logo_path = None → default img
+
+    def _on_profile_name_preview(self, text: str):
+        """Live preview: update sidebar name label as user types."""
+        name = text.strip()
+        if any(c.isalnum() for c in name):
+            self._title_label.setText(name)
+
+    def _on_profile_page_save(self):
+        name = self._profile_name_edit.text().strip()
+        if not any(c.isalnum() for c in name):
+            name = "Veaja"
+        self._pending_profile["app_name"] = name
+        # Commit sidebar immediately so it persists after navigating away
+        self._title_label.setText(name)
+        self.setWindowTitle(name)
+        self._reload_header_logo(self._pending_profile.get("logo_path"))
+        self.profile_save_requested.emit(dict(self._pending_profile))
+        self._navigate(0)   # back to dashboard
 
     # ── Voice Setting page ─────────────────────────────────────────────────────
 
@@ -824,7 +1064,7 @@ class MainWindow(QMainWindow):
         h_lay.addStretch()
         clear_btn = QPushButton("Clear")
         clear_btn.setObjectName("btnOutline")
-        clear_btn.setFixedSize(56, 28)
+        clear_btn.setFixedSize(72, 28)
         clear_btn.clicked.connect(self._clear_history)
         h_lay.addWidget(clear_btn)
         lay.addWidget(hdr)
@@ -861,58 +1101,41 @@ class MainWindow(QMainWindow):
         card = QWidget()
         card.setObjectName("historyCard")
 
-        outer = QHBoxLayout(card)
-        outer.setContentsMargins(16, 14, 16, 14)
-        outer.setSpacing(0)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(18, 14, 14, 16)
+        lay.setSpacing(8)
 
-        inner = QVBoxLayout()
-        inner.setSpacing(10)
-
-        # Header row: label + progress bar + dot
+        # Header row: [label] [stretch] [delete icon button]
         hdr = QHBoxLayout()
-        hdr.setSpacing(12)
+        hdr.setSpacing(0)
+
         lbl = QLabel(section_label)
         lbl.setObjectName("historyCardLabel")
-        lbl.setFixedWidth(62)
         hdr.addWidget(lbl)
+        hdr.addStretch()
 
-        prog = QWidget()
-        prog.setObjectName("historyProgress")
-        prog.setFixedHeight(6)
-        prog_lay = QHBoxLayout(prog)
-        prog_lay.setContentsMargins(0, 0, 0, 0)
-        prog_lay.setSpacing(4)
-        fill = QWidget()
-        fill.setObjectName("progFill")
-        fill.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        rest = QWidget()
-        rest.setObjectName("progRest")
-        rest.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        prog_lay.addWidget(fill, 2)
-        prog_lay.addWidget(rest, 1)
-        hdr.addWidget(prog, 1)
+        del_btn = QPushButton()
+        del_btn.setObjectName("historyDel")
+        del_btn.setFixedSize(26, 26)
+        del_btn.setFlat(True)
+        del_btn.setToolTip("Delete")
+        icon_color = "#888888"
+        del_icon = svg_icon(os.path.join(ASSETS, "delete_icon.svg"), icon_color, 18)
+        if not del_icon.isNull():
+            del_btn.setIcon(del_icon)
+            del_btn.setIconSize(QSize(18, 18))
+        else:
+            del_btn.setText("✕")
+        del_btn.clicked.connect(lambda: self._delete_history_entry(full_text, card))
+        hdr.addWidget(del_btn)
 
-        dot = QLabel("•")
-        dot.setObjectName("historyDot")
-        hdr.addWidget(dot)
-        inner.addLayout(hdr)
+        lay.addLayout(hdr)
 
         # Body text
         body = QLabel(short)
         body.setObjectName("historyText")
         body.setWordWrap(True)
-        inner.addWidget(body)
-
-        outer.addLayout(inner, 1)
-
-        # Delete button (right side)
-        del_btn = QPushButton("🗑")
-        del_btn.setObjectName("historyDel")
-        del_btn.setFixedSize(28, 28)
-        del_btn.setFlat(True)
-        del_btn.setToolTip("Delete")
-        del_btn.clicked.connect(lambda: self._delete_history_entry(full_text, card))
-        outer.addWidget(del_btn, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addWidget(body)
         return card
 
     def _delete_history_entry(self, full_text: str, card: QWidget):
@@ -943,7 +1166,8 @@ class MainWindow(QMainWindow):
         h_lay.addStretch()
         email_btn = QPushButton("Email")
         email_btn.setObjectName("btnOutline")
-        email_btn.setFixedSize(60, 28)
+        email_btn.setFixedSize(90, 32)
+        email_btn.clicked.connect(self._open_contact_email)
         h_lay.addWidget(email_btn)
         lay.addWidget(hdr)
 
@@ -972,6 +1196,19 @@ class MainWindow(QMainWindow):
         scroll.setWidget(sc)
         lay.addWidget(scroll, 1)
         return page
+
+    def _open_contact_email(self):
+        """Open the user's default mail client addressed to Veaja support."""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        subject = "Veaja – Question / Feedback"
+        body    = "Hi Veaja team,\n\n"
+        mailto  = (
+            f"mailto:veaja.app.official@gmail.com"
+            f"?subject={subject.replace(' ', '%20').replace('/', '%2F').replace('–', '%E2%80%93')}"
+            f"&body={body.replace(' ', '%20').replace('\n', '%0A')}"
+        )
+        QDesktopServices.openUrl(QUrl(mailto))
 
     # ── Data Privacy page ──────────────────────────────────────────────────────
 
@@ -1088,7 +1325,9 @@ class MainWindow(QMainWindow):
             self._voice_combo.addItem(v["name"], v["id"])
             # Sync first voice name to sound input
         if voices:
-            self._sound_input.setText(voices[0]["name"])
+            first_name = voices[0].get("name", "") or ""
+            if first_name:
+                self._sound_input.setText(first_name)
         self._voice_combo.blockSignals(False)
 
     def set_text(self, text: str):
@@ -1105,22 +1344,18 @@ class MainWindow(QMainWindow):
             btn.setText("Read")
             btn.setProperty("btnState", "idle")
             btn.setEnabled(True)
-            self._stop_btn.setEnabled(False)
         elif state == ReadState.PROCESSING:
             btn.setText("⏳…")
             btn.setProperty("btnState", "processing")
             btn.setEnabled(False)
-            self._stop_btn.setEnabled(True)
         elif state == ReadState.SPEAKING:
             btn.setText("⏸")
             btn.setProperty("btnState", "active")
             btn.setEnabled(True)
-            self._stop_btn.setEnabled(True)
         elif state == ReadState.PAUSED:
             btn.setText("▶")
             btn.setProperty("btnState", "paused")
             btn.setEnabled(True)
-            self._stop_btn.setEnabled(True)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
         btn.update()
@@ -1134,6 +1369,8 @@ class MainWindow(QMainWindow):
 
     def apply_profile(self, profile: dict):
         name = profile.get("app_name", "Veaja") or "Veaja"
+        if not any(c.isalnum() for c in name):   # reject names like "......."
+            name = "Veaja"
         self._title_label.setText(name)
         self.setWindowTitle(name)
         self._reload_header_logo(profile.get("logo_path"))
@@ -1288,6 +1525,12 @@ class MainWindow(QMainWindow):
         self._reload_pill_logo()
         self._apply_theme()
         self.theme_changed.emit(self._dark)
+        # If edit profile page is open, refresh its glow colour and photo
+        if self._content_stack.currentIndex() == 6:
+            self._apply_profile_page_glow()
+            # Only swap to default logo if no custom photo is set
+            if not self._pending_profile.get("logo_path") and not self._logo_path:
+                self._reload_profile_page_photo()
 
     def _apply_theme(self):
         # Content area QSS
@@ -1314,13 +1557,14 @@ class MainWindow(QMainWindow):
         theme_px = svg_pixmap(os.path.join(ASSETS, theme_svg), icon_color, 18)
         if theme_px:
             self._theme_btn.setIcon(svg_icon(os.path.join(ASSETS, theme_svg), icon_color, 18))
-            self._theme_btn.setIconSize(theme_px.size())
+            # Use logical size (18×18), not physical pixel size, to stay inside the button
+            self._theme_btn.setIconSize(QSize(18, 18))
         else:
             self._theme_btn.setText("☀" if self._dark else "☾")
 
         # Edit icon next to profile name
         if self._edit_icon_lbl is not None:
-            edit_px = svg_pixmap(os.path.join(ASSETS, "edit_icon.svg"), icon_color, 14)
+            edit_px = svg_pixmap(os.path.join(ASSETS, "edit_icon.svg"), icon_color, 16)
             if edit_px:
                 self._edit_icon_lbl.setPixmap(edit_px)
 
@@ -1339,39 +1583,37 @@ class MainWindow(QMainWindow):
             priv_icon = svg_icon(os.path.join(ASSETS, "data_privacy_icon.svg"), icon_color, 16)
             self._privacy_btn.setIcon(priv_icon)
 
-        # Profile glow border
-        glow = "#f5a623" if self._dark else "#7c6fff"
-        bg   = "#000000"
+        # Profile frame — no glow border, just match sidebar background
+        bg = "#f0f0f0" if self._dark else "#1a1a1a"
         if self._profile_frame:
             self._profile_frame.setStyleSheet(
-                f"QWidget {{ background: {bg}; border-radius: 10px;"
-                f" border: 3px solid {glow}; }}"
+                f"#profileFrame {{ background: {bg}; border-radius: 10px; border: none; }}"
             )
-        # Profile name color follows sidebar text
-        name_color = "#1a1a1a" if self._dark else "#ffffff"
-        self._title_label.setStyleSheet(
-            f"color: {name_color}; font-size: 15px;"
-            f" font-weight: 500; background: transparent;"
-        )
+        # Profile name colour is handled by QLabel#profileName rule in sidebar QSS
+
+    def _default_logo_path(self) -> str | None:
+        """Return the best available default logo path — PNG preferred over SVG."""
+        stem = "logo_light" if self._dark else "logo_dark"
+        for ext in (".png", ".svg"):
+            p = os.path.join(ASSETS, stem + ext)
+            if os.path.exists(p):
+                return p
+        return None
 
     def _reload_header_logo(self, logo_path: str | None = None):
         if logo_path is not None:
             self._logo_path = logo_path if (logo_path and os.path.exists(logo_path)) else None
-        if self._logo_path and os.path.exists(self._logo_path):
-            px = _make_square_pixmap(self._logo_path, 76)
-        else:
-            name = "logo_light.png" if self._dark else "logo_dark.png"
-            path = os.path.join(ASSETS, name)
-            px = _make_square_pixmap(path, 76) if os.path.exists(path) else None
+        src = self._logo_path if (self._logo_path and os.path.exists(self._logo_path)) \
+              else self._default_logo_path()
+        px = _make_square_pixmap(src, 76) if src else None
         if px and hasattr(self, "_header_logo"):
             self._header_logo.setPixmap(px)
 
     def _reload_pill_logo(self):
         if not hasattr(self, "_pill_logo"):
             return
-        name = "logo_light.png" if self._dark else "logo_dark.png"
-        path = os.path.join(ASSETS, name)
-        px = _make_square_pixmap(path, 26) if os.path.exists(path) else None
+        src = self._default_logo_path()
+        px = _make_square_pixmap(src, 26) if src else None
         if px:
             self._pill_logo.setPixmap(px)
 

@@ -15,10 +15,24 @@ except ImportError:
     _SVG_AVAILABLE = False
 
 
+def _device_pixel_ratio() -> float:
+    """Return the primary screen DPR (2.0 on Retina, 1.0 otherwise)."""
+    try:
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            screen = app.primaryScreen()
+            if screen:
+                return screen.devicePixelRatio()
+    except Exception:
+        pass
+    return 1.0
+
+
 def svg_pixmap(path: str, color: str, size: int) -> QPixmap | None:
     """
     Load an SVG file, recolor every fill to `color`, and render
-    to a transparent QPixmap of the given square size.
+    to a HiDPI-aware transparent QPixmap of the given logical square size.
     Returns None if SVG support is unavailable or the file is missing.
     """
     if not _SVG_AVAILABLE or not os.path.exists(path):
@@ -41,11 +55,42 @@ def svg_pixmap(path: str, color: str, size: int) -> QPixmap | None:
         if not renderer.isValid():
             return None
 
-        px = QPixmap(size, size)
+        # Render at physical pixel size so Retina displays stay sharp
+        dpr  = _device_pixel_ratio()
+        phys = int(size * dpr)
+        px = QPixmap(phys, phys)
         px.fill(Qt.GlobalColor.transparent)
         painter = QPainter(px)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         renderer.render(painter)
         painter.end()
+        px.setDevicePixelRatio(dpr)
+        return px
+    except Exception:
+        return None
+
+
+def svg_pixmap_raw(path: str, size: int) -> QPixmap | None:
+    """
+    Render an SVG file as-is (no colour changes) to a HiDPI-aware QPixmap.
+    Used for full-colour logo assets.
+    """
+    if not _SVG_AVAILABLE or not os.path.exists(path):
+        return None
+    try:
+        renderer = QSvgRenderer(path)
+        if not renderer.isValid():
+            return None
+
+        dpr  = _device_pixel_ratio()
+        phys = int(size * dpr)
+        px = QPixmap(phys, phys)
+        px.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(px)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        renderer.render(painter)
+        painter.end()
+        px.setDevicePixelRatio(dpr)
         return px
     except Exception:
         return None

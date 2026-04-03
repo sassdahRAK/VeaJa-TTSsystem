@@ -187,7 +187,9 @@ class ProfileDialog(QDialog):
 
     def _on_save(self):
         name = self._name_edit.text().strip()
-        self._profile["app_name"] = name if name else "Veaja"
+        if not any(c.isalnum() for c in name):   # reject "......." type names
+            name = "Veaja"
+        self._profile["app_name"] = name
         self.accept()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
