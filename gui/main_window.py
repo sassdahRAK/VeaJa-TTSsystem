@@ -45,7 +45,10 @@ QPushButton {
     padding: 2px 4px;
     border-radius: 4px;
 }
-QPushButton:hover { color: #ffffff; background: rgba(255,255,255,0.08); }
+QPushButton:hover   { color: #ffffff; background: rgba(255,255,255,0.08); }
+/* Nav links: 50% opacity on active page, 100% otherwise */
+QPushButton:checked { color: rgba(221,221,221,0.50); background: transparent; }
+/* Dashboard — filled when active */
 QPushButton#dashBtn {
     background: #ffffff;
     color: #1a1a1a;
@@ -57,12 +60,15 @@ QPushButton#dashBtn {
     padding: 9px 0;
 }
 QPushButton#dashBtn:hover   { background: #f0f0f0; }
+/* Dashboard — border-only when NOT active */
 QPushButton#dashBtn:!checked {
     background: transparent;
     color: #aaaaaa;
-    border: none;
+    border: 1px solid rgba(255,255,255,0.25);
     font-weight: 400;
 }
+/* Override the general :checked dimming for dashBtn — keep it opaque when active */
+QPushButton#dashBtn:checked { background: #ffffff; color: #1a1a1a; }
 QPushButton#themeBtn {
     background: transparent;
     border: none;
@@ -96,7 +102,10 @@ QPushButton {
     padding: 2px 4px;
     border-radius: 4px;
 }
-QPushButton:hover { color: #1a1a1a; background: rgba(0,0,0,0.07); }
+QPushButton:hover   { color: #1a1a1a; background: rgba(0,0,0,0.07); }
+/* Nav links: 50% opacity on active page, 100% otherwise */
+QPushButton:checked { color: rgba(51,51,51,0.50); background: transparent; }
+/* Dashboard — filled when active */
 QPushButton#dashBtn {
     background: #1a1a1a;
     color: #ffffff;
@@ -108,12 +117,15 @@ QPushButton#dashBtn {
     padding: 9px 0;
 }
 QPushButton#dashBtn:hover   { background: #333333; }
+/* Dashboard — border-only when NOT active */
 QPushButton#dashBtn:!checked {
     background: transparent;
     color: #888888;
-    border: none;
+    border: 1px solid rgba(0,0,0,0.20);
     font-weight: 400;
 }
+/* Override the general :checked dimming for dashBtn — keep it opaque when active */
+QPushButton#dashBtn:checked { background: #1a1a1a; color: #ffffff; }
 QPushButton#themeBtn {
     background: transparent;
     border: none;
@@ -481,7 +493,18 @@ class MainWindow(QMainWindow):
             "Select text in any window and press  Ctrl+R  to read aloud,\n"
             "or press  Ctrl+C  and the overlay pill will appear automatically.\n\n"
             "The floating pill tracks each word in real-time so you can\n"
-            "follow along without switching windows."
+            "follow along without switching windows.\n\n"
+            "Veaja works everywhere — PDFs, emails, web pages, documents,\n"
+            "and even apps that don't have a built-in read-aloud feature.\n"
+            "No copy-paste needed. Just select and go.\n\n"
+            "Choose from a wide range of natural-sounding voices across\n"
+            "multiple accents and languages. Adjust speed to match your\n"
+            "reading pace — slower to absorb detail, faster to skim.\n\n"
+            "Every session is saved to your history so you can replay\n"
+            "anything you've listened to — great for studying, reviewing\n"
+            "notes, or catching up on long articles hands-free.\n\n"
+            "Veaja stays out of your way. It lives quietly in your tray,\n"
+            "ready the moment you need it — no window clutter, no interruptions."
         )
         self._overlay_text_view.setObjectName("bodyText")
         self._overlay_text_view.setWordWrap(True)
@@ -510,13 +533,6 @@ class MainWindow(QMainWindow):
         pill_lay = QHBoxLayout(pill)
         pill_lay.setContentsMargins(7, 6, 14, 6)
         pill_lay.setSpacing(9)
-
-        self._pill_logo = QLabel()
-        self._pill_logo.setObjectName("pillLogo")
-        self._pill_logo.setFixedSize(26, 26)
-        self._pill_logo.setScaledContents(True)
-        self._reload_pill_logo()
-        pill_lay.addWidget(self._pill_logo)
 
         tap_lbl = QLabel("Tap to read")
         tap_lbl.setStyleSheet("font-size: 12px; background: transparent;")
@@ -735,15 +751,22 @@ class MainWindow(QMainWindow):
         """Apply theme-aware blur glow to the large profile photo frame and name input."""
         if not self._profile_photo_frame:
             return
-        # Dark mode → warm orange glow  |  Light mode → cool purple glow
-        glow_color = QColor("#f5a623") if self._dark else QColor("#7c6fff")
-        bg = "#f0f0f0" if self._dark else "#1a1a1a"
-        # Clean solid border — the visual ring comes from the drop shadow only
+        # Dark mode → warm golden glow + border  |  Light mode → soft purple glow only
+        if self._dark:
+            glow_color = QColor("#f5a623")
+            glow_hex   = "#f5a623"
+            bg         = "#111111"
+            border     = f"border: 2px solid {glow_hex};"
+        else:
+            glow_color = QColor("#7c6fff")
+            glow_hex   = "#7c6fff"
+            bg         = "#ffffff"
+            border     = "border: none;"
         self._profile_photo_frame.setStyleSheet(
-            f"#profilePhotoFrame {{ background: {bg}; border-radius: 12px; border: none; }}"
+            f"#profilePhotoFrame {{ background: {bg}; border-radius: 12px; {border} }}"
         )
         shadow = QGraphicsDropShadowEffect(self._profile_photo_frame)
-        shadow.setBlurRadius(32)
+        shadow.setBlurRadius(65)
         shadow.setOffset(0, 0)
         shadow.setColor(glow_color)
         self._profile_photo_frame.setGraphicsEffect(shadow)
@@ -1377,6 +1400,11 @@ class MainWindow(QMainWindow):
         color = profile.get("highlight_color", "#FFD60A")
         if color:
             self._highlight_color = color
+        # Restore saved dark/light preference (None = already at system default)
+        saved_dark = profile.get("dark_mode")
+        if saved_dark is not None and isinstance(saved_dark, bool):
+            if saved_dark != self._dark:
+                self._toggle_theme()
 
     def mark_reading_started(self, text: str):
         self._last_read_text = text

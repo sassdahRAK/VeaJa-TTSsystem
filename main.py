@@ -65,8 +65,19 @@ def main() -> None:
     app = QApplication(sys.argv)
     _configure_app(app)
 
-    # ── 1. Splash screen ─────────────────────────────────────────────────
-    splash = SplashScreen()
+    # ── 1. Splash screen — read saved theme before building anything ─────
+    _saved_dark: bool | None = None
+    try:
+        import json
+        from core.profile import PROFILE_PATH
+        with open(PROFILE_PATH, encoding="utf-8") as _f:
+            _saved_dark = json.load(_f).get("dark_mode")
+        if not isinstance(_saved_dark, bool):
+            _saved_dark = None
+    except Exception:
+        pass
+
+    splash = SplashScreen(saved_dark=_saved_dark)
     splash.show()
     app.processEvents()          # paint splash immediately before heavy init
 

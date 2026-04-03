@@ -18,6 +18,7 @@ DEFAULT_PROFILE: dict = {
     "logo_path":       None,         # null = use bundled logo
     "terms_accepted":  False,
     "highlight_color": "#FFD60A",    # word-highlight colour (yellow)
+    "dark_mode":       None,         # None = follow system; True/False = user override
 }
 
 

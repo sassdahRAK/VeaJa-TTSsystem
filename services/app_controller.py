@@ -310,6 +310,10 @@ class AppController(QObject):
     def _on_theme_changed(self, dark: bool):
         self._tray.update_icon(dark)
         self._overlay.update_theme(dark)
+        # Persist the user's theme choice so it survives app restarts
+        profile = self._profile.get()
+        profile["dark_mode"] = dark
+        self._profile.save(profile)
 
     # ------------------------------------------------------------------ #
     # Terms dialog
