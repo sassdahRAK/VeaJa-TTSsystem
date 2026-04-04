@@ -9,9 +9,12 @@ Steps that have navigate_to/tab will call main_window.navigate_if_needed()
 so the user sees the feature being demonstrated in context (live-teach).
 """
 
+import html as _html
+import re   as _re
+
 from PyQt6.QtWidgets import QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout
-from PyQt6.QtCore import Qt, QRect, QRectF, QPoint, QEvent
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
+from PyQt6.QtCore    import Qt, QRect, QRectF, QPoint, QEvent
+from PyQt6.QtGui     import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 
 
 # ── Tour step definitions ──────────────────────────────────────────────────────
@@ -25,8 +28,8 @@ STEPS = [
         "title": "Welcome to Veaja!",
         "body": (
             "This live tutorial walks you through every feature.\n\n"
-            "Use  Next  and  Back  to navigate, or  Skip  to close.\n\n"
-            "Each step jumps to the relevant page so you can see\n"
+            "Use Next and Back to navigate, or Skip to close.\n\n"
+            "Each step jumps to the relevant page so you can see "
             "the feature in context — live!"
         ),
         "navigate_to": None,
@@ -38,11 +41,11 @@ STEPS = [
         "title": "Reading in PDF / Word / Browser",
         "body": (
             "Veaja reads text from any application:\n\n"
-            "1. Select text in your PDF / Word / browser\n"
-            "2. Press  Ctrl+R  — Veaja reads it immediately\n"
-            "   (or  Ctrl+C  — the overlay pill appears automatically)\n"
-            "3. The floating pill tracks each word in yellow so you\n"
-            "   can follow along without switching windows."
+            "1. Select text in your PDF, Word, or browser\n"
+            "2. Press Ctrl+R — Veaja reads it immediately\n"
+            "   (or Ctrl+C — the overlay pill appears automatically)\n"
+            "3. The floating pill tracks each word in yellow so you "
+            "can follow along without switching windows."
         ),
         "navigate_to": 0,
         "tab": 0,
@@ -53,9 +56,9 @@ STEPS = [
         "widget_attr": "_overlay_text_view",
         "title": "Overlay Tab — Live Preview",
         "body": (
-            "The Overlay tab shows the text currently loaded\n"
+            "The Overlay tab shows the text currently loaded "
             "from your clipboard or selection.\n\n"
-            "When Veaja reads, words are highlighted in yellow\n"
+            "When Veaja reads, words are highlighted in yellow "
             "in the floating pill overlay above all windows."
         ),
         "navigate_to": 0,
@@ -68,8 +71,8 @@ STEPS = [
         "title": "Text Label Tab — Type or Paste",
         "body": (
             "Type or paste text here, then click Read.\n\n"
-            "While reading, each word is highlighted in yellow from\n"
-            "left to right — a visual progress bar for your eyes.\n\n"
+            "While reading, each word is highlighted in yellow "
+            "from left to right — a visual progress bar for your eyes.\n\n"
             "Tip: paste long articles here for the best experience."
         ),
         "navigate_to": 0,
@@ -93,7 +96,7 @@ STEPS = [
         "widget_attr": "_online_btn",
         "title": "Online / Offline Mode",
         "body": (
-            "Online  — Microsoft neural voices.\n"
+            "Online — Microsoft neural voices.\n"
             "High-quality, human-like. Requires internet.\n\n"
             "Offline — Windows system voices.\n"
             "Works without internet. More robotic.\n\n"
@@ -106,7 +109,7 @@ STEPS = [
         "title": "Voice Selector",
         "body": (
             "Choose your preferred voice.\n\n"
-            "Online voices include regional accents:\n"
+            "Online voices include regional accents: "
             "US, UK, and Australian English."
         ),
         "navigate_to": 1,
@@ -152,9 +155,8 @@ STEPS = [
         "widget_attr": None,
         "title": "Ask a Question",
         "body": (
-            "Find answers to common questions in the\n"
-            "Ask a Question section.\n\n"
-            "Topics include: overlay usage, data privacy,\n"
+            "Find answers to common questions in the Ask a Question section.\n\n"
+            "Topics include: overlay usage, data privacy, "
             "and platform availability.\n\n"
             "Use the Email button to contact support."
         ),
@@ -166,9 +168,9 @@ STEPS = [
         "widget_attr": "_theme_btn",
         "title": "Dark / Light Mode",
         "body": (
-            "Toggle between dark and light themes using the\n"
+            "Toggle between dark and light themes using the "
             "☀ / ☾ button at the top of the sidebar.\n\n"
-            "The floating overlay and tray icon both\n"
+            "The floating overlay and tray icon both "
             "follow this setting automatically."
         ),
         "navigate_to": None,
@@ -180,11 +182,11 @@ STEPS = [
         "title": "Word Highlighting — Two Modes",
         "body": (
             "Veaja highlights words in two places simultaneously:\n\n"
-            "1.  Dashboard Text tab  — yellow progress bar left-to-right.\n"
-            "    Best when you paste text directly into Veaja.\n\n"
-            "2.  Overlay pill  — karaoke display shows the current word\n"
-            "    in yellow. Use this when reading PDFs or browser pages\n"
-            "    so you never need to switch windows.\n\n"
+            "1. Dashboard Text tab — yellow progress bar left-to-right. "
+            "Best when you paste text directly into Veaja.\n\n"
+            "2. Overlay pill — karaoke display shows the current word "
+            "in yellow. Use this when reading PDFs or browser pages "
+            "so you never need to switch windows.\n\n"
             "Customise the highlight colour in your Profile."
         ),
         "navigate_to": None,
@@ -196,9 +198,9 @@ STEPS = [
         "title": "You're all set!",
         "body": (
             "Quick recap for reading third-party documents:\n\n"
-            "1. Open your PDF / Word / browser\n"
+            "1. Open your PDF, Word, or browser\n"
             "2. Select the text you want\n"
-            "3. Press  Ctrl+R  (no switching, no copy-paste)\n"
+            "3. Press Ctrl+R — no switching, no copy-paste\n"
             "4. Watch the overlay pill — it tracks every word in yellow\n\n"
             "Enjoy Veaja!"
         ),
@@ -210,56 +212,70 @@ STEPS = [
 # ── Bubble widget ──────────────────────────────────────────────────────────────
 
 class _Bubble(QWidget):
-    """Floating rounded card with title, body, and Prev / Next / Skip."""
+    """Floating rounded card — polished design with progress bar."""
+
+    _W = 400   # fixed card width
 
     def __init__(self, on_prev, on_next, on_skip, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Widget)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
-        self.setMinimumWidth(300)
-        self.setMaximumWidth(340)
+        self.setFixedWidth(self._W)
+
+        self._total   = 1
+        self._current = 0
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(28, 22, 28, 32)   # extra bottom for progress bar
+        layout.setSpacing(0)
 
+        # ── Step counter ──────────────────────────────────────────────
         self._step_label = QLabel()
         self._step_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        f = QFont()
-        f.setPointSize(9)
-        self._step_label.setFont(f)
+        sf = QFont()
+        sf.setPointSize(9)
+        self._step_label.setFont(sf)
         layout.addWidget(self._step_label)
+        layout.addSpacing(10)
 
+        # ── Title ─────────────────────────────────────────────────────
         self._title = QLabel()
-        title_font = QFont()
-        title_font.setPointSize(13)
-        title_font.setWeight(QFont.Weight.Bold)
-        self._title.setFont(title_font)
+        tf = QFont()
+        tf.setPointSize(14)
+        tf.setWeight(QFont.Weight.Bold)
+        self._title.setFont(tf)
         self._title.setWordWrap(True)
         layout.addWidget(self._title)
+        layout.addSpacing(10)
 
+        # ── Body ──────────────────────────────────────────────────────
         self._body = QLabel()
-        body_font = QFont()
-        body_font.setPointSize(10)
-        self._body.setFont(body_font)
+        bf = QFont()
+        bf.setPointSize(11)
+        self._body.setFont(bf)
         self._body.setWordWrap(True)
+        self._body.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(self._body)
+        layout.addSpacing(22)
 
-        layout.addSpacing(8)
-
+        # ── Buttons ───────────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row.setSpacing(10)
+        btn_row.setContentsMargins(0, 0, 0, 0)
 
         self._prev_btn = QPushButton("← Back")
-        self._prev_btn.setFixedHeight(32)
+        self._prev_btn.setFixedHeight(36)
+        self._prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._prev_btn.clicked.connect(on_prev)
 
         self._next_btn = QPushButton("Next →")
-        self._next_btn.setFixedHeight(32)
+        self._next_btn.setFixedHeight(36)
+        self._next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._next_btn.clicked.connect(on_next)
 
         self._skip_btn = QPushButton("Skip")
-        self._skip_btn.setFixedHeight(32)
+        self._skip_btn.setFixedHeight(36)
+        self._skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._skip_btn.clicked.connect(on_skip)
 
         btn_row.addWidget(self._prev_btn)
@@ -268,13 +284,39 @@ class _Bubble(QWidget):
         btn_row.addWidget(self._skip_btn)
         layout.addLayout(btn_row)
 
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _fmt_body(text: str) -> str:
+        """Convert plain body text to styled HTML."""
+        escaped = _html.escape(text)
+        # Highlight keyboard shortcuts like Ctrl+R
+        escaped = _re.sub(
+            r'(Ctrl\+\w+)',
+            r'<span style="background:rgba(128,128,128,0.18);'
+            r'border-radius:3px;padding:0 4px;font-family:monospace;'
+            r'font-size:10px;">\1</span>',
+            escaped,
+        )
+        escaped = escaped.replace('\n\n', '<br><br>')
+        escaped = escaped.replace('\n',   '<br>')
+        return f'<span style="line-height:1.6;">{escaped}</span>'
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
     def update_content(self, step_idx: int, total: int, title: str, body: str):
+        self._total   = total
+        self._current = step_idx
         self._step_label.setText(f"{step_idx + 1} / {total}")
         self._title.setText(title)
-        self._body.setText(body)
+        self._body.setText(self._fmt_body(body))
         self._prev_btn.setEnabled(step_idx > 0)
-        self._next_btn.setText("Done" if step_idx == total - 1 else "Next →")
+        is_last = step_idx == total - 1
+        self._next_btn.setText("Done" if is_last else "Next →")
         self.adjustSize()
+        self.update()   # repaint progress bar
+
+    # ── Paint ─────────────────────────────────────────────────────────────────
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -282,22 +324,54 @@ class _Bubble(QWidget):
 
         is_dark = self.palette().color(self.backgroundRole()).lightness() < 128
         if is_dark:
-            bg     = QColor(30, 30, 32, 250)
-            text   = QColor(245, 245, 247)
-            border = QColor(70, 70, 75, 200)
+            bg      = QColor(26, 26, 28, 254)
+            text_c  = QColor(245, 245, 247)
+            sub_c   = QColor(155, 155, 162)
+            border  = QColor(58, 58, 63, 200)
+            trk_c   = QColor(58, 58, 63)
+            fill_c  = QColor(10, 132, 255)
         else:
-            bg     = QColor(255, 255, 255, 250)
-            text   = QColor(28, 28, 30)
-            border = QColor(210, 210, 215, 200)
+            bg      = QColor(255, 255, 255, 254)
+            text_c  = QColor(28, 28, 30)
+            sub_c   = QColor(100, 100, 110)
+            border  = QColor(210, 210, 215, 200)
+            trk_c   = QColor(218, 218, 223)
+            fill_c  = QColor(10, 132, 255)
 
-        self._title.setStyleSheet(f"color: {text.name()};")
-        self._body.setStyleSheet(f"color: {text.name()};")
-        self._step_label.setStyleSheet(f"color: {text.name()};")
+        self._title.setStyleSheet(
+            f"color: {text_c.name()}; background: transparent;")
+        self._body.setStyleSheet(
+            f"color: {sub_c.name()}; background: transparent;")
+        self._step_label.setStyleSheet(
+            f"color: {sub_c.name()}; background: transparent;")
 
+        # Card background
         rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1.0))
-        painter.drawRoundedRect(rect, 14, 14)
+        painter.drawRoundedRect(rect, 16, 16)
+
+        # Progress bar — thin line at the very bottom of the card
+        if self._total > 1:
+            bar_h  = 3
+            margin = 28
+            bar_y  = self.height() - 14
+            track_w = self.width() - margin * 2
+            fill_w  = int(track_w * (self._current + 1) / self._total)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+
+            # track
+            painter.setBrush(QBrush(trk_c))
+            painter.drawRoundedRect(
+                QRectF(margin, bar_y, track_w, bar_h), bar_h / 2, bar_h / 2)
+
+            # fill
+            if fill_w > 0:
+                painter.setBrush(QBrush(fill_c))
+                painter.drawRoundedRect(
+                    QRectF(margin, bar_y, fill_w, bar_h), bar_h / 2, bar_h / 2)
+
         painter.setPen(Qt.PenStyle.NoPen)
 
 
@@ -346,13 +420,13 @@ class TourOverlay(QWidget):
         self._step = idx
         step = self._steps[idx]
 
-        # Live-teach: navigate to the relevant page first
         navigate_to = step.get("navigate_to")
         if navigate_to is not None and hasattr(self._main, "navigate_if_needed"):
             tab = step.get("tab")
             self._main.navigate_if_needed(navigate_to, tab=tab)
 
-        self._bubble.update_content(idx, len(self._steps), step["title"], step["body"])
+        self._bubble.update_content(
+            idx, len(self._steps), step["title"], step["body"])
         self._position_bubble(step.get("widget_attr"))
         self.update()
 
@@ -403,18 +477,22 @@ class TourOverlay(QWidget):
 
         step = self._steps[self._step]
         spot = self._target_rect(step.get("widget_attr"))
-        dim  = QColor(0, 0, 0, 160)
 
-        painter.fillRect(self.rect(), dim)
+        # Dim the background
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
 
         if spot is not None:
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+            # Cut out the spotlight
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_Clear)
             path = QPainterPath()
             path.addRoundedRect(QRectF(spot), 10, 10)
             painter.fillPath(path, QBrush(Qt.GlobalColor.transparent))
 
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-            painter.setPen(QPen(QColor(10, 132, 255, 200), 2.0))
+            # Blue spotlight border
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.setPen(QPen(QColor(10, 132, 255, 220), 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(QRectF(spot), 10, 10)
 
@@ -444,21 +522,28 @@ class TourOverlay(QWidget):
     # ── Button styling ─────────────────────────────────────────────────────────
 
     def _style_buttons(self):
-        base = "QPushButton { border-radius: 8px; font-size: 12px; padding: 0 12px; }"
+        base = (
+            "QPushButton {"
+            "  border-radius: 8px;"
+            "  font-size: 13px;"
+            "  padding: 0 16px;"
+            "  font-weight: 500;"
+            "}"
+        )
         self._bubble._next_btn.setStyleSheet(
-            f"{base}"
+            base +
             "QPushButton { background: #0A84FF; color: #fff; border: none; }"
-            "QPushButton:hover { background: #339AF0; }"
+            "QPushButton:hover { background: #2A9AFF; }"
         )
         self._bubble._prev_btn.setStyleSheet(
-            f"{base}"
+            base +
             "QPushButton { background: transparent; color: #0A84FF;"
-            " border: 1px solid #0A84FF; }"
-            "QPushButton:hover { background: rgba(10,132,255,0.12); }"
-            "QPushButton:disabled { color: #555; border-color: #555; }"
+            "  border: 1.5px solid #0A84FF; }"
+            "QPushButton:hover { background: rgba(10,132,255,0.10); }"
+            "QPushButton:disabled { color: #aaa; border-color: #aaa; }"
         )
         self._bubble._skip_btn.setStyleSheet(
-            f"{base}"
-            "QPushButton { background: transparent; color: #888; border: none; }"
-            "QPushButton:hover { color: #ccc; }"
+            base +
+            "QPushButton { background: transparent; color: #999; border: none; }"
+            "QPushButton:hover { color: #555; }"
         )
