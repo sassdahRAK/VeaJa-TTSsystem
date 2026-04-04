@@ -32,6 +32,13 @@ QLabel#settingsLabel {
     color: #aaaaaa;
     background: transparent;
 }
+QLabel#shapeSectionLabel {
+    font-size: 11px;
+    color: #777777;
+    background: transparent;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
 
 /* Generic labels inside content */
 QLabel {
@@ -167,38 +174,58 @@ QWidget#shapeBox {
     border-radius: 10px;
     background: #2b2b2b;
 }
+QWidget#shapePreviewSvg { background: transparent; border-radius: 8px; }
+QPushButton#shapeBtnCircle, QPushButton#shapeBtnRect {
+    background: transparent;
+    color: #aaaaaa;
+    border: 1px solid #555555;
+    border-radius: 8px;
+    font-size: 13px;
+    padding: 0 18px;
+}
+QPushButton#shapeBtnCircle:hover, QPushButton#shapeBtnRect:hover {
+    border-color: #888888; color: #ffffff;
+}
+QPushButton#shapeBtnCircle:checked, QPushButton#shapeBtnRect:checked {
+    background: #ffffff; color: #111111;
+    border-color: #ffffff; font-weight: 600;
+}
 QCheckBox#settingsCheck {
     color: #ffffff;
-    font-size: 13px;
-    spacing: 8px;
+    font-size: 15px;
+    spacing: 10px;
 }
 QCheckBox#settingsCheck::indicator {
-    width: 15px; height: 15px;
-    border: 1px solid #555555;
-    border-radius: 3px;
-    background: #2b2b2b;
+    width: 22px; height: 22px;
+    border: 2px solid #666666;
+    border-radius: 5px;
+    background: transparent;
 }
 QCheckBox#settingsCheck::indicator:checked {
     background: #ffffff;
     border-color: #ffffff;
+    border-radius: 5px;
+    image: url(assets/check_dark.svg);
 }
 
 /* Mini shape previews */
-QWidget#miniPreviewDark  { background: #1a1a1a; border-radius: 8px; }
-QWidget#miniPreviewLight { background: #f0f0f0; border-radius: 8px; }
-QWidget#miniPillDark  { background: #111111; border-radius: 20px; }
-QWidget#miniPillLight { background: #ffffff;  border-radius: 20px; border: 1px solid #cccccc; }
-QWidget#miniDotLight  { background: #555555; border-radius: 6px; }
-QWidget#miniDotDark   { background: #aaaaaa; border-radius: 6px; }
+QWidget#miniPreviewDark  { background: #1a1a1a; border-radius: 10px; }
+QWidget#miniPreviewLight { background: #f5f5f5; border-radius: 10px; border: 1px solid #dddddd; }
+QWidget#miniPillDark  { background: #2a2a2a; border-radius: 16px; }
+QWidget#miniPillLight { background: #ffffff;  border-radius: 16px; border: 1px solid #cccccc; }
+QSvgWidget#miniPillSvg { background: transparent; }
 QLabel#miniTextLight  { color: #ffffff; background: transparent; }
-QLabel#miniTextDark   { color: #1a1a1a; background: transparent; }
-QLabel#miniSpeechLight { color: #bbbbbb; background: transparent; }
-QLabel#miniSpeechDark  { color: #666666; background: transparent; }
+QLabel#miniTextDark   { color: #222222; background: transparent; }
+QLabel#miniSpeechLight { color: #aaaaaa; font-size: 8px; background: transparent; }
+QLabel#miniSpeechDark  { color: #555555; font-size: 8px; background: transparent; }
+
+/* Shape card edit icon */
+QLabel#shapeEditIcon { color: #888888; font-size: 16px; background: transparent; }
 
 /* Inline edit icon */
 QLabel#inlineEdit {
     color: #666666;
-    font-size: 14px;
+    font-size: 15px;
     background: transparent;
 }
 
@@ -214,7 +241,28 @@ QLineEdit#settingsInput {
 QLineEdit#settingsInput:focus { border-color: #ffffff; }
 
 /* Combo box */
-QComboBox { background: #2b2b2b; color: #ffffff; border: 1px solid #555555; border-radius: 5px; }
+QComboBox {
+    background: #2b2b2b;
+    color: #ffffff;
+    border: 1px solid #555555;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+}
+QComboBox:hover { border-color: #888888; }
+QComboBox::drop-down { border: none; width: 24px; }
+QComboBox::down-arrow { image: none; width: 0; height: 0;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid #aaaaaa; }
+QComboBox QAbstractItemView {
+    background: #2b2b2b;
+    color: #ffffff;
+    border: 1px solid #555555;
+    border-radius: 6px;
+    selection-background-color: #444444;
+    selection-color: #ffffff;
+    outline: none;
+}
 
 /* Speed slider */
 QSlider#speedSlider::groove:horizontal { background: #555555; height: 4px; border-radius: 2px; }

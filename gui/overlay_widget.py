@@ -19,12 +19,13 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QPoint, QRectF, QVariantAnimation,
-    QEasingCurve, pyqtSignal, QTimer
+    QEasingCurve, pyqtSignal, QTimer, QSize
 )
 from PyQt6.QtGui import (
     QPainter, QPainterPath, QColor, QPen, QBrush,
-    QFont, QCursor, QPalette, QAction, QPixmap
+    QFont, QCursor, QPalette, QAction, QPixmap, QIcon
 )
+from PyQt6.QtSvg import QSvgRenderer
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -267,6 +268,34 @@ class OverlayWidget(QWidget):
         self.setFixedWidth(CIRCLE_SIZE)
 
     # ------------------------------------------------------------------ #
+    # Restart icon helper
+    # ------------------------------------------------------------------ #
+
+    def _restart_icon_pixmap(self, color: str, size: int = 17) -> QPixmap:
+        """Render a clean circular-arrow restart icon SVG into a QPixmap."""
+        svg = (
+            f'<svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">'
+            f'<path d="M15 9 A6 6 0 1 1 12.2 3.7" '
+            f'stroke="{color}" stroke-width="2.1" fill="none" stroke-linecap="round"/>'
+            f'<polyline points="11.5,1.2 13.8,4.0 10.2,4.8" '
+            f'stroke="{color}" stroke-width="2.1" fill="none" '
+            f'stroke-linecap="round" stroke-linejoin="round"/>'
+            f'</svg>'
+        )
+        app = QApplication.instance()
+        dpr = (app.primaryScreen().devicePixelRatio()
+               if app and app.primaryScreen() else 1.0)
+        phys = int(size * dpr)
+        px = QPixmap(phys, phys)
+        px.fill(Qt.GlobalColor.transparent)
+        renderer = QSvgRenderer(svg.encode())
+        painter = QPainter(px)
+        renderer.render(painter)
+        painter.end()
+        px.setDevicePixelRatio(dpr)
+        return px
+
+    # ------------------------------------------------------------------ #
     # UI layout
     # ------------------------------------------------------------------ #
 
@@ -307,13 +336,14 @@ class OverlayWidget(QWidget):
         font_title.setWeight(QFont.Weight.Medium)
         self._title_label.setFont(font_title)
 
-        self._reset_btn = QPushButton("⟳")
+        self._reset_btn = QPushButton()
         self._reset_btn.setObjectName("overlayResetBtn")
         self._reset_btn.setToolTip("Restart reading from beginning")
         self._reset_btn.setFixedSize(22, 22)
+        self._reset_btn.setIconSize(QSize(17, 17))
         self._reset_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._reset_btn.clicked.connect(self.reset_requested)
-        self._reset_btn.setStyleSheet("background: transparent; border: none; font-size: 13px;")
+        self._reset_btn.setStyleSheet("background: transparent; border: none;")
 
         title_row.addWidget(self._title_label)
         title_row.addStretch()
@@ -399,9 +429,8 @@ class OverlayWidget(QWidget):
         self._body_label.setStyleSheet(
             f"color: {body_color}; background: transparent;"
         )
-        self._reset_btn.setStyleSheet(
-            f"color: {body_color}; background: transparent; border: none; font-size: 13px;"
-        )
+        self._reset_btn.setIcon(QIcon(self._restart_icon_pixmap(body_color)))
+        self._reset_btn.setStyleSheet("background: transparent; border: none;")
 
     def _build_dot_timer(self):
         """Animates '.' → '..' → '...' while processing."""

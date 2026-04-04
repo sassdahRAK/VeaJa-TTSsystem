@@ -11,12 +11,12 @@ from enum import Enum, auto
 from gui.icon_utils import svg_pixmap, svg_icon
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QStackedLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QStackedLayout,
     QLabel, QPushButton, QTextEdit, QSlider, QComboBox, QLineEdit,
     QFrame, QScrollArea, QCheckBox, QSizePolicy, QListWidget, QListWidgetItem,
     QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer, QPoint
 from PyQt6.QtGui import (
     QPalette, QColor, QPixmap, QFont,
     QPainter, QPainterPath, QTextCursor, QTextCharFormat, QBrush
@@ -490,21 +490,10 @@ class MainWindow(QMainWindow):
         ti_lay.setSpacing(0)
 
         self._overlay_text_view = QLabel(
-            "Select text in any window and press  Ctrl+R  to read aloud,\n"
-            "or press  Ctrl+C  and the overlay pill will appear automatically.\n\n"
-            "The floating pill tracks each word in real-time so you can\n"
-            "follow along without switching windows.\n\n"
-            "Veaja works everywhere — PDFs, emails, web pages, documents,\n"
-            "and even apps that don't have a built-in read-aloud feature.\n"
-            "No copy-paste needed. Just select and go.\n\n"
-            "Choose from a wide range of natural-sounding voices across\n"
-            "multiple accents and languages. Adjust speed to match your\n"
-            "reading pace — slower to absorb detail, faster to skim.\n\n"
-            "Every session is saved to your history so you can replay\n"
-            "anything you've listened to — great for studying, reviewing\n"
-            "notes, or catching up on long articles hands-free.\n\n"
-            "Veaja stays out of your way. It lives quietly in your tray,\n"
-            "ready the moment you need it — no window clutter, no interruptions."
+            "Select text in any window and press  Ctrl+R  to read aloud, or press  Ctrl+C  and the overlay pill will appear automatically. The floating pill tracks each word in real-time so you can follow along without switching windows — no need to swap between apps or lose your place.\n\n"
+            "Veaja is a real text-to-speech tool built for everyday use. It works across PDFs, emails, web pages, documents, and apps that have no built-in read-aloud feature — just select text and it reads, no copy-paste required. You get a choice of natural-sounding voices across multiple accents and languages, with speed control so you can slow down to absorb detail or speed up to skim. Every session is saved to your history so you can replay anything you've heard — useful for studying, reviewing notes, or catching up on long content hands-free. Veaja runs quietly in your system tray, ready the moment you need it, without cluttering your screen or interrupting your workflow.\n\n"
+            "How Veaja works under the hood: when you select text and trigger a read, Veaja captures the selected content through your system clipboard or accessibility layer and passes it directly to a TTS engine. The engine processes the raw text, applies language detection to pick the right voice model, and streams synthesized audio to your output device in real-time. Word-level timestamps returned by the engine drive the highlight on the floating pill — each word lights up in sync with what is being spoken. The overlay itself is a transparent, always-on-top window that stays anchored to your screen corner and never interferes with clicks or focus in the window beneath it.\n\n"
+            "The history system records every reading session — the original text, the voice used, the speed setting, and a timestamp — so you can revisit any session from the history page and replay it exactly as it was. Language detection runs automatically before synthesis so Veaja picks the correct pronunciation rules without you having to change settings manually. Speed adjustment is applied at the synthesis stage, not by resampling audio after the fact, which means faster or slower playback keeps the voice sounding natural rather than robotic or distorted."
         )
         self._overlay_text_view.setObjectName("bodyText")
         self._overlay_text_view.setWordWrap(True)
@@ -516,35 +505,61 @@ class MainWindow(QMainWindow):
         scroll.setWidget(text_inner)
         stack_lay.addWidget(scroll)
 
-        # ── Layer 1 — floating pill overlay (transparent container) ───────
+        # ── Layer 1 — floating draggable pill (SVG icon, absolute position) ──
+        _PILL_W, _PILL_H = 300, 98          # display size (SVG native: 219×72)
+
         pill_float = QWidget()
+        pill_float.setObjectName("pillFloat")
         pill_float.setStyleSheet("background: transparent;")
-        pill_float.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        pf_lay = QVBoxLayout(pill_float)
-        pf_lay.setContentsMargins(18, 0, 0, 18)
-        pf_lay.setSpacing(0)
-        pf_lay.addStretch()
 
-        pill_row = QHBoxLayout()
-        pill_row.setSpacing(0)
+        pill = QLabel(pill_float)
+        pill.setObjectName("dashboardPill")
+        pill.setFixedSize(_PILL_W, _PILL_H)
+        pill.setCursor(Qt.CursorShape.OpenHandCursor)
+        pill.setStyleSheet("background: transparent;")
 
-        pill = QWidget()
-        pill.setObjectName("pillWidget")
-        pill_lay = QHBoxLayout(pill)
-        pill_lay.setContentsMargins(7, 6, 14, 6)
-        pill_lay.setSpacing(9)
+        self._dashboard_pill_lbl  = pill
+        self._pill_float          = pill_float
+        self._pill_drag_start:  QPoint | None = None
+        self._pill_drag_origin: QPoint | None = None
 
-        tap_lbl = QLabel("Tap to read")
-        tap_lbl.setStyleSheet("font-size: 12px; background: transparent;")
-        pill_lay.addWidget(tap_lbl)
+        def _pill_press(ev):
+            if ev.button() == Qt.MouseButton.LeftButton:
+                pill.setCursor(Qt.CursorShape.ClosedHandCursor)
+                self._pill_drag_start  = ev.globalPosition().toPoint()
+                self._pill_drag_origin = pill.pos()
+            ev.accept()
 
-        refresh_lbl = QLabel("↻")
-        refresh_lbl.setObjectName("refreshIcon")
-        pill_lay.addWidget(refresh_lbl)
+        def _pill_move(ev):
+            if self._pill_drag_start is None:
+                return
+            delta   = ev.globalPosition().toPoint() - self._pill_drag_start
+            new_pos = self._pill_drag_origin + delta
+            max_x   = pill_float.width()  - pill.width()
+            max_y   = pill_float.height() - pill.height()
+            pill.move(max(0, min(new_pos.x(), max_x)),
+                      max(0, min(new_pos.y(), max_y)))
+            ev.accept()
 
-        pill_row.addWidget(pill)
-        pill_row.addStretch()
-        pf_lay.addLayout(pill_row)
+        def _pill_release(ev):
+            pill.setCursor(Qt.CursorShape.OpenHandCursor)
+            self._pill_drag_start  = None
+            self._pill_drag_origin = None
+            ev.accept()
+
+        pill.mousePressEvent   = _pill_press
+        pill.mouseMoveEvent    = _pill_move
+        pill.mouseReleaseEvent = _pill_release
+
+        # Render initial SVG (shape not known yet — default circle)
+        QTimer.singleShot(0, self._update_dashboard_pill_icon)
+
+        # Initial position: bottom-left of pill_float
+        def _init_pill_pos():
+            y = max(0, pill_float.height() - _PILL_H - 18)
+            pill.move(18, y)
+        QTimer.singleShot(0, _init_pill_pos)
+
         stack_lay.addWidget(pill_float)
         stack_lay.setCurrentIndex(1)
 
@@ -850,11 +865,11 @@ class MainWindow(QMainWindow):
         top = QWidget()
         top.setObjectName("pageTopAction")
         t_lay = QHBoxLayout(top)
-        t_lay.setContentsMargins(32, 20, 32, 16)
+        t_lay.setContentsMargins(32, 14, 32, 10)
         t_lay.addStretch()
         save_btn = QPushButton("Save")
         save_btn.setObjectName("btnOutline")
-        save_btn.setFixedSize(64, 28)
+        save_btn.setFixedSize(90, 32)
         save_btn.clicked.connect(lambda: None)
         t_lay.addWidget(save_btn)
         lay.addWidget(top)
@@ -866,24 +881,36 @@ class MainWindow(QMainWindow):
 
         sc = QWidget()
         sc_lay = QVBoxLayout(sc)
-        sc_lay.setContentsMargins(32, 0, 32, 32)
-        sc_lay.setSpacing(20)
+        sc_lay.setContentsMargins(32, 0, 32, 24)
+        sc_lay.setSpacing(14)
 
         # ── Shape ─────────────────────────────────────────────────────────
-        shape_lbl = QLabel("Shape")
-        shape_lbl.setObjectName("settingsLabel")
+        shape_lbl = QLabel("Set overlay shape")
+        shape_lbl.setObjectName("shapeSectionLabel")
         sc_lay.addWidget(shape_lbl)
 
         shape_box = QWidget()
         shape_box.setObjectName("shapeBox")
         sb_lay = QVBoxLayout(shape_box)
-        sb_lay.setContentsMargins(16, 16, 16, 8)
-        sb_lay.setSpacing(14)
+        sb_lay.setContentsMargins(16, 8, 16, 40)
+        sb_lay.setSpacing(0)
 
-        # Circle row
+        # Edit icon top-right — floated, doesn't affect vertical rhythm
+        edit_row = QHBoxLayout()
+        edit_row.setContentsMargins(0, 0, 0, 0)
+        edit_row.addStretch()
+        shape_edit_ic = self._inline_edit_icon()
+        shape_edit_ic.setObjectName("shapeEditIcon")
+        shape_edit_ic.setFixedSize(16, 16)
+        edit_row.addWidget(shape_edit_ic)
+        sb_lay.addLayout(edit_row)
+
+        # Circle row — negative spacing pulls it up tight under edit icon
         circle_row = self._shape_row("Circle", is_circle=True, checked=True)
         self._shape_circle = circle_row[0]
         sb_lay.addWidget(circle_row[1])
+
+        sb_lay.addSpacing(20)   # gap between Circle and Rectangle rows
 
         # Rectangle row
         rect_row = self._shape_row("Rectangle", is_circle=False, checked=False)
@@ -897,22 +924,30 @@ class MainWindow(QMainWindow):
         self._shape_rect.toggled.connect(
             lambda c: self._shape_circle.setChecked(not c) if c else None
         )
+
+        # Keep dashboard pill SVG in sync with shape setting
+        self._shape_circle.toggled.connect(lambda _: self._update_dashboard_pill_icon())
+        QTimer.singleShot(0, self._update_dashboard_pill_icon)   # apply on first load
+
         sc_lay.addWidget(shape_box)
 
         # ── Mode + Language ───────────────────────────────────────────────
         ml_row = QHBoxLayout()
-        ml_row.setSpacing(48)
+        ml_row.setSpacing(0)
 
-        mode_col = QVBoxLayout()
-        mode_col.setSpacing(8)
+        # Mode label + checkboxes (stacked label, then horizontal checkboxes)
+        mode_block = QVBoxLayout()
+        mode_block.setSpacing(10)
         mode_lbl = QLabel("Mode")
         mode_lbl.setObjectName("settingsLabel")
-        mode_col.addWidget(mode_lbl)
+        mode_block.addWidget(mode_lbl)
+        chk_row = QHBoxLayout()
+        chk_row.setSpacing(40)
         self._online_btn = QCheckBox("Online Mode")
         self._online_btn.setObjectName("settingsCheck")
         self._online_btn.setChecked(True)
         self._online_btn.toggled.connect(self._on_mode_checkbox)
-        mode_col.addWidget(self._online_btn)
+        chk_row.addWidget(self._online_btn)
         self._offline_btn = QCheckBox("Offline Mode")
         self._offline_btn.setObjectName("settingsCheck")
         self._offline_btn.toggled.connect(
@@ -920,54 +955,57 @@ class MainWindow(QMainWindow):
                        self._online_btn.setChecked(not c),
                        self._online_btn.blockSignals(False)) if c else None
         )
-        mode_col.addWidget(self._offline_btn)
-        ml_row.addLayout(mode_col)
+        chk_row.addWidget(self._offline_btn)
+        chk_row.addStretch()
+        mode_block.addLayout(chk_row)
+        ml_row.addLayout(mode_block, 1)
 
-        lang_col = QVBoxLayout()
-        lang_col.setSpacing(8)
+        # Language — right-aligned, same row
+        lang_block = QVBoxLayout()
+        lang_block.setSpacing(10)
         lang_lbl = QLabel("Language")
         lang_lbl.setObjectName("settingsLabel")
-        lang_col.addWidget(lang_lbl)
+        lang_block.addWidget(lang_lbl)
         lang_inline = QHBoxLayout()
         lang_inline.setSpacing(10)
-        self._lang_btn = QPushButton("English")
-        self._lang_btn.setObjectName("btnOutline")
-        self._lang_btn.setFixedHeight(28)
-        lang_inline.addWidget(self._lang_btn)
+        self._lang_combo = QComboBox()
+        self._lang_combo.setObjectName("settingsCombo")
+        self._lang_combo.setFixedWidth(160)
+        self._lang_combo.addItem("English")
+        lang_inline.addWidget(self._lang_combo)
         lang_inline.addWidget(self._inline_edit_icon())
-        lang_inline.addStretch()
-        lang_col.addLayout(lang_inline)
-        ml_row.addLayout(lang_col)
-        ml_row.addStretch()
+        lang_block.addLayout(lang_inline)
+        ml_row.addLayout(lang_block, 1)
         sc_lay.addLayout(ml_row)
 
         # ── Sound + Speed ─────────────────────────────────────────────────
         ss_row = QHBoxLayout()
-        ss_row.setSpacing(48)
+        ss_row.setSpacing(0)
 
-        sound_col = QVBoxLayout()
-        sound_col.setSpacing(8)
+        sound_block = QVBoxLayout()
+        sound_block.setSpacing(10)
         sound_lbl = QLabel("Sound")
         sound_lbl.setObjectName("settingsLabel")
-        sound_col.addWidget(sound_lbl)
+        sound_block.addWidget(sound_lbl)
         sound_inline = QHBoxLayout()
         sound_inline.setSpacing(10)
-        self._sound_input = QLineEdit("Alice")
-        self._sound_input.setObjectName("settingsInput")
-        self._sound_input.setFixedWidth(140)
+        self._sound_input = QComboBox()
+        self._sound_input.setObjectName("settingsCombo")
+        self._sound_input.setFixedWidth(200)
+        self._sound_input.currentIndexChanged.connect(self._on_sound_combo_changed)
         sound_inline.addWidget(self._sound_input)
         sound_inline.addWidget(self._inline_edit_icon())
         sound_inline.addStretch()
-        sound_col.addLayout(sound_inline)
-        ss_row.addLayout(sound_col)
+        sound_block.addLayout(sound_inline)
+        ss_row.addLayout(sound_block, 1)
 
-        speed_col = QVBoxLayout()
-        speed_col.setSpacing(8)
+        speed_block = QVBoxLayout()
+        speed_block.setSpacing(10)
         speed_lbl = QLabel("Speed")
         speed_lbl.setObjectName("settingsLabel")
-        speed_col.addWidget(speed_lbl)
+        speed_block.addWidget(speed_lbl)
         spd_inline = QHBoxLayout()
-        spd_inline.setSpacing(8)
+        spd_inline.setSpacing(10)
         spd_inline.addWidget(QLabel("🐢"))
         self._speed_slider = QSlider(Qt.Orientation.Horizontal)
         self._speed_slider.setRange(50, 400)
@@ -976,9 +1014,8 @@ class MainWindow(QMainWindow):
         self._speed_slider.valueChanged.connect(self._on_speed_changed)
         spd_inline.addWidget(self._speed_slider, 1)
         spd_inline.addWidget(QLabel("🐇"))
-        speed_col.addLayout(spd_inline)
-        ss_row.addLayout(speed_col)
-        ss_row.addStretch()
+        speed_block.addLayout(spd_inline)
+        ss_row.addLayout(speed_block, 1)
         sc_lay.addLayout(ss_row)
 
         # Hidden combo (kept for AppController / TourOverlay compat)
@@ -1006,7 +1043,7 @@ class MainWindow(QMainWindow):
         row = QWidget()
         row_lay = QVBoxLayout(row)
         row_lay.setContentsMargins(0, 0, 0, 0)
-        row_lay.setSpacing(10)
+        row_lay.setSpacing(14)
 
         chk = QCheckBox(label)
         chk.setObjectName("settingsCheck")
@@ -1014,7 +1051,7 @@ class MainWindow(QMainWindow):
         row_lay.addWidget(chk)
 
         previews_row = QHBoxLayout()
-        previews_row.setSpacing(12)
+        previews_row.setSpacing(14)
         previews_row.addWidget(self._mini_preview(is_circle, dark=True))
         previews_row.addWidget(self._mini_preview(is_circle, dark=False))
         previews_row.addStretch()
@@ -1022,38 +1059,55 @@ class MainWindow(QMainWindow):
         return chk, row
 
     def _mini_preview(self, is_circle: bool, dark: bool) -> QWidget:
-        """Small shape preview card (dark or light background)."""
+        """Shape preview card using SVG pill icon + description text."""
+        from PyQt6.QtSvg import QSvgRenderer
+        from PyQt6.QtGui import QPainter
+
+        # SVG native: 219×72 — display at inner width preserving aspect ratio
+        _inner_w = 236
+        _pill_h  = int(_inner_w * 72 / 219)   # ≈ 78px
+
         card = QWidget()
-        card.setFixedSize(150, 90)
+        card.setFixedSize(260, _pill_h + 80)
         card.setObjectName("miniPreviewDark" if dark else "miniPreviewLight")
         card_lay = QVBoxLayout(card)
-        card_lay.setContentsMargins(10, 10, 10, 8)
-        card_lay.setSpacing(6)
+        card_lay.setContentsMargins(12, 10, 12, 10)
+        card_lay.setSpacing(8)
 
-        pill = QWidget()
-        pill.setObjectName("miniPillDark" if dark else "miniPillLight")
-        pill.setFixedHeight(22)
-        p_lay = QHBoxLayout(pill)
-        p_lay.setContentsMargins(4, 2, 8, 2)
-        p_lay.setSpacing(4)
-        dot = QWidget()
-        dot.setFixedSize(12, 12)
-        dot.setObjectName("miniDotLight" if dark else "miniDotDark")
-        p_lay.addWidget(dot)
-        tap = QLabel("Tap to read")
-        tap.setObjectName("miniTextLight" if dark else "miniTextDark")
-        tap.setFont(QFont("Segoe UI", 7))
-        p_lay.addWidget(tap)
-        ref = QLabel("↻")
-        ref.setObjectName("miniTextLight" if dark else "miniTextDark")
-        ref.setFont(QFont("Segoe UI", 7))
-        p_lay.addWidget(ref)
-        card_lay.addWidget(pill)
+        if is_circle:
+            svg_name = "overlay_circle_dark_icon.svg" if dark else "overlay_circle_light_icon.svg"
+        else:
+            svg_name = "overlay_retangle_dark_icon.svg" if dark else "overlay_retangle_light_icon.svg"
 
-        speech = QLabel("Hi, I'm Veaja. What would you like me to read for you today?")
+        svg_path = os.path.join(ASSETS, svg_name)
+        pill_lbl = QLabel()
+        pill_lbl.setFixedSize(_inner_w, _pill_h)
+        pill_lbl.setObjectName("miniPillSvg")
+        if os.path.exists(svg_path):
+            # Render SVG → QPixmap so embedded base64 images are resolved
+            app_inst = QApplication.instance()
+            dpr = app_inst.primaryScreen().devicePixelRatio() if app_inst else 1.0
+            phys_w = int(_inner_w * dpr)
+            phys_h = int(_pill_h  * dpr)
+            px = QPixmap(phys_w, phys_h)
+            px.fill(Qt.GlobalColor.transparent)
+            renderer = QSvgRenderer(svg_path)
+            painter  = QPainter(px)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            renderer.render(painter)
+            painter.end()
+            px.setDevicePixelRatio(dpr)
+            pill_lbl.setPixmap(px)
+        card_lay.addWidget(pill_lbl)
+
+        speech = QLabel(
+            "Hi, my name is Veaja. what do you want me to read for you. I'm here to "
+            "assist you brother. And don't mind me if my voice isn't sweat enough. "
+            "Haa just kidding, cuz I'm a friendly ai assistance. No matter"
+        )
         speech.setObjectName("miniSpeechLight" if dark else "miniSpeechDark")
         speech.setWordWrap(True)
-        speech.setFont(QFont("Segoe UI", 7))
+        speech.setFont(QFont("-apple-system", 8))
         card_lay.addWidget(speech, 1)
         return card
 
@@ -1202,17 +1256,47 @@ class MainWindow(QMainWindow):
         sc_lay.setContentsMargins(32, 0, 32, 32)
         sc_lay.setSpacing(14)
         for q, a in [
-            ("Q1. How to use overlay feature?",
-             "Select text in any PDF, Word doc, or browser.\n"
-             "Press Ctrl+R to read immediately, or Ctrl+C to show the overlay pill.\n"
-             "The pill highlights each word in yellow as Veaja reads aloud."),
-            ("Q2. Do you collect data from us?",
-             "No. Veaja does not collect personal data or analytics.\n"
-             "In Online mode, text is sent to Microsoft's servers for TTS only.\n"
-             "In Offline mode, all processing happens entirely on your device."),
-            ("Q3. Can I use this app on mobile phone or tablet?",
-             "Currently Veaja is a desktop app for Windows, macOS, and Linux.\n"
-             "Mobile support (Android and iOS) is planned for a future release."),
+            ("Q1. How do I start using Veaja?",
+             "Install and launch Veaja — it will sit quietly in your system tray.\n"
+             "Select any text in any window, then press Ctrl+R to read it aloud immediately.\n"
+             "Alternatively, press Ctrl+C and the overlay pill will appear on your screen so you can follow along word by word.\n"
+             "No setup, no account, and no copy-paste is needed. Just select and go."),
+            ("Q2. What is the overlay pill and how does it work?",
+             "The overlay pill is a small floating widget that appears on top of your screen when Veaja is reading.\n"
+             "It shows the Veaja logo, a 'Tap to read' label, and a restart button.\n"
+             "As Veaja speaks, it highlights each word in real-time so you can follow along without switching windows.\n"
+             "The pill stays on top of all other apps and never blocks your clicks or keyboard input underneath it.\n"
+             "You can drag it anywhere on your screen to keep it out of the way."),
+            ("Q3. What is the difference between Online and Offline mode?",
+             "Offline mode: all processing is done locally on your device using a built-in TTS engine. No internet needed. Completely private.\n"
+             "Online mode: your text is sent to Microsoft Azure Cognitive Services, which returns higher-quality, more natural-sounding speech.\n"
+             "In Online mode, no account or API key is required — Veaja uses the Edge browser's built-in neural TTS service.\n"
+             "Choose Offline if privacy is your priority. Choose Online for the best voice quality."),
+            ("Q4. Does Veaja store or record what I read?",
+             "Veaja saves a session history so you can replay past readings from the View History page.\n"
+             "This history is stored only on your local device — it is never uploaded to any server.\n"
+             "In Offline mode, no data ever leaves your machine.\n"
+             "In Online mode, the text is sent to Microsoft's TTS service but Veaja itself does not log, store, or share it.\n"
+             "You can clear your history at any time from the history page."),
+            ("Q5. Which languages and voices are supported?",
+             "Currently Veaja supports English only.\n"
+             "Multiple voices and accents are available in English — you can choose your preferred voice from Voice Settings.\n"
+             "Support for additional languages such as Arabic, French, Spanish, German, and Japanese is planned for a future release.\n"
+             "Stay tuned for updates."),
+            ("Q6. Can I adjust reading speed?",
+             "Yes. Go to Voice Settings and use the speed control to slow down or speed up playback.\n"
+             "Speed adjustment is applied at the synthesis stage — not by resampling audio after the fact.\n"
+             "This means slow or fast speeds still sound natural, not robotic or distorted.\n"
+             "Slower speeds are great for absorbing detail. Faster speeds are useful for skimming long documents."),
+            ("Q7. Why is Veaja not reading my selected text?",
+             "Make sure the text is actually selectable — some protected PDFs or images do not expose their text.\n"
+             "If Ctrl+R does not work, check that Veaja is running in the system tray (look for the tray icon).\n"
+             "On macOS, Veaja may need Accessibility permission — go to System Settings → Privacy & Security → Accessibility and enable Veaja.\n"
+             "On Windows, some admin-protected applications may block text capture. Try copying the text manually and using the Text Label tab instead."),
+            ("Q8. Can I use this app on a mobile phone or tablet?",
+             "Currently Veaja is a desktop application available for Windows, macOS, and Linux.\n"
+             "Mobile support for Android and iOS is planned for a future release.\n"
+             "For now, you can use Veaja on any laptop or desktop computer."),
         ]:
             sc_lay.addWidget(self._info_card(q, a))
         sc_lay.addStretch()
@@ -1255,16 +1339,42 @@ class MainWindow(QMainWindow):
         sc_lay.setContentsMargins(0, 0, 0, 0)
         sc_lay.setSpacing(14)
         for t, body in [
-            ("T1. Offline usage:",
-             "All text-to-speech processing is performed entirely on your device.\n"
-             "No data is transmitted to external servers.\n"
-             "Audio files are stored locally at ~/.veaja/audio/ and cleared each session.\n"
-             "You are responsible for the content you choose to read."),
-            ("T2. Online usage:",
-             "Text is sent to Microsoft Azure Cognitive Services for neural TTS synthesis.\n"
-             "Veaja does not store, log, or share this text.\n"
-             "Microsoft's privacy policy applies to data sent via their API.\n"
-             "No account or API key is required — Veaja uses Edge browser's built-in TTS."),
+            ("T1. Acceptance of terms",
+             "By installing or using Veaja, you agree to these terms of use.\n"
+             "If you do not agree, please uninstall the application and discontinue use.\n"
+             "These terms may be updated over time. Continued use after an update means you accept the revised terms."),
+            ("T2. Offline usage",
+             "In Offline mode, all text-to-speech processing is performed entirely on your device.\n"
+             "No data is transmitted to any external server.\n"
+             "Audio files generated during a session are stored temporarily at ~/.veaja/audio/ and cleared when the session ends.\n"
+             "You are solely responsible for the content you choose to read aloud using Veaja."),
+            ("T3. Online usage",
+             "In Online mode, the text you select is sent to Microsoft Azure Cognitive Services for neural TTS synthesis.\n"
+             "Veaja does not store, log, retain, or share this text in any form.\n"
+             "Microsoft's own privacy policy governs how they handle data sent through their API.\n"
+             "No account, subscription, or API key is required — Veaja relies on the Edge browser's built-in TTS service."),
+            ("T4. Acceptable use",
+             "You may use Veaja for personal, educational, or professional reading of text you have the right to access.\n"
+             "You must not use Veaja to read, reproduce, or distribute copyrighted content without authorisation.\n"
+             "You must not use Veaja to process content that is illegal, harmful, abusive, or violates the rights of others.\n"
+             "Veaja is a reading aid — it is your responsibility to ensure the content you read complies with applicable laws."),
+            ("T5. Data and privacy",
+             "Veaja does not create user accounts and does not collect personal information.\n"
+             "Session history is stored locally on your device only and is never uploaded.\n"
+             "Your voice settings, language preferences, and profile name are saved locally in a configuration file on your machine.\n"
+             "You can delete this data at any time by clearing the app's configuration folder."),
+            ("T6. Third-party services",
+             "Online mode uses Microsoft Azure Cognitive Services (TTS). Use of this service is subject to Microsoft's terms and privacy policy.\n"
+             "Veaja does not endorse or take responsibility for the accuracy, availability, or practices of any third-party service.\n"
+             "If Microsoft's TTS service is unavailable, Veaja will fall back to Offline mode automatically when possible."),
+            ("T7. Limitation of liability",
+             "Veaja is provided 'as is' without warranty of any kind, express or implied.\n"
+             "The developers are not liable for any loss of data, interruption of service, or damages arising from use of this application.\n"
+             "Veaja is a tool — you are responsible for how you use the output it produces."),
+            ("T8. Changes and termination",
+             "The developers reserve the right to update, modify, or discontinue Veaja at any time without notice.\n"
+             "Features available in the current version may change in future releases.\n"
+             "You may stop using Veaja at any time by uninstalling it. Local data can be removed manually from your device."),
         ]:
             sc_lay.addWidget(self._info_card(t, body))
         sc_lay.addStretch()
@@ -1343,15 +1453,14 @@ class MainWindow(QMainWindow):
 
     def populate_voices(self, voices: list[dict]):
         self._voice_combo.blockSignals(True)
+        self._sound_input.blockSignals(True)
         self._voice_combo.clear()
+        self._sound_input.clear()
         for v in voices:
             self._voice_combo.addItem(v["name"], v["id"])
-            # Sync first voice name to sound input
-        if voices:
-            first_name = voices[0].get("name", "") or ""
-            if first_name:
-                self._sound_input.setText(first_name)
+            self._sound_input.addItem(v["name"], v["id"])
         self._voice_combo.blockSignals(False)
+        self._sound_input.blockSignals(False)
 
     def set_text(self, text: str):
         self.clear_highlight()
@@ -1473,7 +1582,17 @@ class MainWindow(QMainWindow):
         if self._tts:
             self._tts.set_voice(self._voice_combo.itemData(index))
         if index >= 0:
-            self._sound_input.setText(self._voice_combo.itemText(index))
+            self._sound_input.blockSignals(True)
+            self._sound_input.setCurrentIndex(index)
+            self._sound_input.blockSignals(False)
+
+    def _on_sound_combo_changed(self, index: int):
+        if index >= 0:
+            self._voice_combo.blockSignals(True)
+            self._voice_combo.setCurrentIndex(index)
+            self._voice_combo.blockSignals(False)
+            if self._tts:
+                self._tts.set_voice(self._sound_input.itemData(index))
 
     def _on_speed_changed(self, value: int):
         if self._tts:
@@ -1550,7 +1669,7 @@ class MainWindow(QMainWindow):
     def _toggle_theme(self):
         self._dark = not self._dark
         self._reload_header_logo()
-        self._reload_pill_logo()
+        self._update_dashboard_pill_icon()
         self._apply_theme()
         self.theme_changed.emit(self._dark)
         # If edit profile page is open, refresh its glow colour and photo
@@ -1637,13 +1756,35 @@ class MainWindow(QMainWindow):
         if px and hasattr(self, "_header_logo"):
             self._header_logo.setPixmap(px)
 
-    def _reload_pill_logo(self):
-        if not hasattr(self, "_pill_logo"):
+    def _update_dashboard_pill_icon(self):
+        """Re-render the dashboard pill using the correct overlay SVG (shape + theme)."""
+        if not hasattr(self, "_dashboard_pill_lbl"):
             return
-        src = self._default_logo_path()
-        px = _make_square_pixmap(src, 26) if src else None
-        if px:
-            self._pill_logo.setPixmap(px)
+        from PyQt6.QtSvg import QSvgRenderer
+
+        is_circle = (not hasattr(self, "_shape_circle")) or self._shape_circle.isChecked()
+        if is_circle:
+            svg_name = "overlay_circle_dark_icon.svg" if self._dark else "overlay_circle_light_icon.svg"
+        else:
+            svg_name = "overlay_retangle_dark_icon.svg" if self._dark else "overlay_retangle_light_icon.svg"
+
+        svg_path = os.path.join(ASSETS, svg_name)
+        if not os.path.exists(svg_path):
+            return
+
+        pill = self._dashboard_pill_lbl
+        w, h = pill.width(), pill.height()
+        app  = QApplication.instance()
+        dpr  = app.primaryScreen().devicePixelRatio() if app else 1.0
+        px   = QPixmap(int(w * dpr), int(h * dpr))
+        px.fill(Qt.GlobalColor.transparent)
+        renderer = QSvgRenderer(svg_path)
+        painter  = QPainter(px)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        renderer.render(painter)
+        painter.end()
+        px.setDevicePixelRatio(dpr)
+        pill.setPixmap(px)
 
     # ════════════════════════════════════════════════════════════════════════ #
     #  WINDOW

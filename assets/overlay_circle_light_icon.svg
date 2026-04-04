@@ -1,0 +1,22 @@
+<svg width="219" height="72" viewBox="0 0 219 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Pill background (light) -->
+  <rect width="219" height="72" rx="36" fill="#F5F5F5"/>
+  <rect x="0.75" y="0.75" width="217.5" height="70.5" rx="35.25" stroke="#CCCCCC" stroke-width="1.5"/>
+
+  <!-- Avatar circle placeholder -->
+  <circle cx="36" cy="36" r="26" fill="#E0E0E0"/>
+  <circle cx="36" cy="29" r="8" fill="#BBBBBB"/>
+  <path d="M18 52 Q36 41 54 52" stroke="#BBBBBB" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- "Tap to read" label -->
+  <rect x="70" y="13" width="72" height="8" rx="3" fill="#888888"/>
+
+  <!-- Restart icon (top-right) -->
+  <path d="M200 12 A7 7 0 1 1 193 19" stroke="#AAAAAA" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  <polygon points="200,9 203,14 197,14" fill="#AAAAAA"/>
+
+  <!-- Body text placeholder lines -->
+  <rect x="70" y="29" width="132" height="5" rx="2.5" fill="#CCCCCC"/>
+  <rect x="70" y="39" width="122" height="5" rx="2.5" fill="#CCCCCC"/>
+  <rect x="70" y="49" width="100" height="5" rx="2.5" fill="#CCCCCC"/>
+</svg>
