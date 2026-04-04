@@ -73,6 +73,7 @@ class AppController(QObject):
         self._main_window.resume_requested.connect(self._resume_speaking)
         self._main_window.quit_requested.connect(self._quit)
         self._main_window.theme_changed.connect(self._on_theme_changed)
+        self._main_window.shape_changed.connect(self._overlay.set_shape)
         self._main_window.terms_requested.connect(self._show_terms)
         self._main_window.profile_requested.connect(self._show_profile_dialog)
         self._main_window.mode_changed.connect(self._on_mode_changed)

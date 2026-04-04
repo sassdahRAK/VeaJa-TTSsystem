@@ -172,9 +172,17 @@ class _LogoCircle(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        # Circular clip
+        # Clip shape — circle or rounded-rect depending on parent's _shape
+        try:
+            shape = self.parent()._shape
+        except AttributeError:
+            shape = "circle"
+
         clip = QPainterPath()
-        clip.addEllipse(QRectF(0, 0, LOGO_SIZE, LOGO_SIZE))
+        if shape == "rectangle":
+            clip.addRoundedRect(QRectF(0, 0, LOGO_SIZE, LOGO_SIZE), 14, 14)
+        else:
+            clip.addEllipse(QRectF(0, 0, LOGO_SIZE, LOGO_SIZE))
         painter.setClipPath(clip)
 
         if self._pixmap and not self._pixmap.isNull():
@@ -196,16 +204,21 @@ class _LogoCircle(QWidget):
                              Qt.AlignmentFlag.AlignCenter, "V")
             return
 
-        # Thin ring border — use parent's stored _dark if available
+        # Thin ring border — use parent's stored _dark / _shape if available
         painter.setClipping(False)
         try:
-            dark = self.parent()._dark
+            dark  = self.parent()._dark
+            shape = self.parent()._shape
         except AttributeError:
-            dark = _is_dark_mode()
+            dark  = _is_dark_mode()
+            shape = "circle"
         border_color = QColor(100, 100, 100, 180) if dark else QColor(200, 200, 200, 200)
         painter.setPen(QPen(border_color, 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(1, 1, LOGO_SIZE - 2, LOGO_SIZE - 2)
+        if shape == "rectangle":
+            painter.drawRoundedRect(QRectF(1, 1, LOGO_SIZE - 2, LOGO_SIZE - 2), 14, 14)
+        else:
+            painter.drawEllipse(1, 1, LOGO_SIZE - 2, LOGO_SIZE - 2)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -243,7 +256,8 @@ class OverlayWidget(QWidget):
         self._dot_count: int = 0
         # Dark mode stored explicitly — don't rely on per-paint detection
         # because Qt may misread Windows 11 dark mode from QPalette.
-        self._dark: bool = _is_dark_mode()
+        self._dark: bool  = _is_dark_mode()
+        self._shape: str  = "circle"   # "circle" | "rectangle"
 
         self._setup_window()
         self._build_ui()
@@ -631,6 +645,15 @@ class OverlayWidget(QWidget):
                                   paused=self._paused)
         self.update()
 
+    def set_shape(self, shape: str):
+        """
+        Called when user changes overlay shape in Voice Settings.
+        shape — 'circle' (default pill) or 'rectangle' (rounded-rect).
+        """
+        self._shape = shape
+        self._logo.update()   # repaint logo clip
+        self.update()         # repaint pill background
+
     # ------------------------------------------------------------------ #
     # Background painting  (pill / circle shape)
     # ------------------------------------------------------------------ #
@@ -646,7 +669,7 @@ class OverlayWidget(QWidget):
         border = QColor(70, 70, 75, 200) if self._dark else QColor(210, 210, 215, 200)
 
         rect   = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
-        radius = PILL_HEIGHT / 2
+        radius = 14 if self._shape == "rectangle" else PILL_HEIGHT / 2
 
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1.0))
@@ -742,3 +765,69 @@ class OverlayWidget(QWidget):
         x = screen.right()  - self.width()  - 24
         y = screen.bottom() - self.height() - 24
         self.move(x, y)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Standalone test — run:  python gui/overlay_widget.py
+# ══════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import sys
+
+    app = QApplication(sys.argv)
+
+    overlay = OverlayWidget()
+
+    # Pre-load sample text so the pill expands on hover
+    overlay.set_text(
+        "Hi, my name is Veaja. I'm here to assist you — hover me to expand, "
+        "click to read, right-click for options."
+    )
+
+    # Show in the centre of the screen for easy access
+    screen = QApplication.primaryScreen().availableGeometry()
+    overlay.move(
+        (screen.width()  - overlay.width())  // 2,
+        (screen.height() - overlay.height()) // 2,
+    )
+    overlay.show_overlay()
+
+    # ── Simple keyboard shortcuts for testing ─────────────────────────────
+    from PyQt6.QtGui import QShortcut, QKeySequence
+
+    # S  → toggle shape  (circle ↔ rectangle)
+    _shapes   = ["circle", "rectangle"]
+    _shape_i  = [0]
+    def _toggle_shape():
+        _shape_i[0] = 1 - _shape_i[0]
+        s = _shapes[_shape_i[0]]
+        overlay.set_shape(s)
+        print(f"[test] shape → {s}")
+    QShortcut(QKeySequence("S"), overlay).activated.connect(_toggle_shape)
+
+    # T  → toggle theme  (dark ↔ light)
+    _dark = [True]
+    def _toggle_theme():
+        _dark[0] = not _dark[0]
+        overlay.update_theme(_dark[0])
+        print(f"[test] dark → {_dark[0]}")
+    QShortcut(QKeySequence("T"), overlay).activated.connect(_toggle_theme)
+
+    # Space → simulate speaking
+    _speaking = [False]
+    def _toggle_speak():
+        _speaking[0] = not _speaking[0]
+        overlay.set_speaking(_speaking[0])
+        print(f"[test] speaking → {_speaking[0]}")
+    QShortcut(QKeySequence("Space"), overlay).activated.connect(_toggle_speak)
+
+    # Q  → quit
+    QShortcut(QKeySequence("Q"), overlay).activated.connect(app.quit)
+
+    print("Overlay test running.")
+    print("  S     → toggle shape (circle / rectangle)")
+    print("  T     → toggle theme (dark / light)")
+    print("  Space → toggle speaking state")
+    print("  Q     → quit")
+
+    sys.exit(app.exec())

@@ -40,6 +40,7 @@ class SettingsMixin:
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setObjectName("settingsScroll")
+        self._settings_scroll = scroll   # kept so TourOverlay can ensureWidgetVisible
 
         sc = QWidget()
         sc_lay = QVBoxLayout(sc)
@@ -90,6 +91,11 @@ class SettingsMixin:
         # Keep dashboard pill SVG in sync with shape setting
         self._shape_circle.toggled.connect(lambda _: self._update_dashboard_pill_icon())
         QTimer.singleShot(0, self._update_dashboard_pill_icon)   # apply on first load
+
+        # Notify AppController → overlay whenever the shape changes
+        self._shape_circle.toggled.connect(
+            lambda c: self.shape_changed.emit("circle" if c else "rectangle")
+        )
 
         sc_lay.addWidget(shape_box)
 

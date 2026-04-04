@@ -66,6 +66,7 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     profile_requested     = pyqtSignal()
     profile_save_requested = pyqtSignal(dict)  # emitted when user saves profile page
     mode_changed          = pyqtSignal(bool)   # True = online
+    shape_changed         = pyqtSignal(str)    # "circle" | "rectangle"
     tour_requested        = pyqtSignal()
 
     def __init__(self, tts_engine=None):

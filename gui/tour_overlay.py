@@ -105,7 +105,7 @@ STEPS = [
         "navigate_to": 1,
     },
     {
-        "widget_attr": "_voice_combo",
+        "widget_attr": "_sound_input",
         "title": "Voice Selector",
         "body": (
             "Choose your preferred voice.\n\n"
@@ -322,19 +322,22 @@ class _Bubble(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        is_dark = self.palette().color(self.backgroundRole()).lightness() < 128
+        try:
+            is_dark = self.parent()._main._dark
+        except AttributeError:
+            is_dark = self.palette().color(self.backgroundRole()).lightness() < 128
         if is_dark:
-            bg      = QColor(26, 26, 28, 254)
-            text_c  = QColor(245, 245, 247)
-            sub_c   = QColor(155, 155, 162)
-            border  = QColor(58, 58, 63, 200)
+            bg      = QColor(26, 26, 28, 64)
+            text_c  = QColor(229, 57, 53)
+            sub_c   = QColor(220, 80, 70)
+            border  = QColor(58, 58, 63, 80)
             trk_c   = QColor(58, 58, 63)
             fill_c  = QColor(10, 132, 255)
         else:
-            bg      = QColor(255, 255, 255, 254)
-            text_c  = QColor(28, 28, 30)
-            sub_c   = QColor(100, 100, 110)
-            border  = QColor(210, 210, 215, 200)
+            bg      = QColor(255, 255, 255, 64)
+            text_c  = QColor(229, 57, 53)
+            sub_c   = QColor(220, 80, 70)
+            border  = QColor(210, 210, 215, 80)
             trk_c   = QColor(218, 218, 223)
             fill_c  = QColor(10, 132, 255)
 
@@ -425,6 +428,13 @@ class TourOverlay(QWidget):
             tab = step.get("tab")
             self._main.navigate_if_needed(navigate_to, tab=tab)
 
+        # Scroll the settings scroll area so the target widget is fully visible
+        widget_attr = step.get("widget_attr")
+        if widget_attr:
+            target = getattr(self._main, widget_attr, None)
+            if target and hasattr(self._main, "_settings_scroll"):
+                self._main._settings_scroll.ensureWidgetVisible(target, 40, 60)
+
         self._bubble.update_content(
             idx, len(self._steps), step["title"], step["body"])
         self._position_bubble(step.get("widget_attr"))
@@ -478,20 +488,32 @@ class TourOverlay(QWidget):
         step = self._steps[self._step]
         spot = self._target_rect(step.get("widget_attr"))
 
+        try:
+            is_dark = self._main._dark
+        except AttributeError:
+            is_dark = False
+
         # Dim the background
         painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
 
         if spot is not None:
-            # Cut out the spotlight
-            painter.setCompositionMode(
-                QPainter.CompositionMode.CompositionMode_Clear)
             path = QPainterPath()
             path.addRoundedRect(QRectF(spot), 10, 10)
+
+            # Clear the dim overlay inside the spotlight
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_Clear)
             painter.fillPath(path, QBrush(Qt.GlobalColor.transparent))
 
-            # Blue spotlight border
+            # Fill spotlight with a clean themed background
             painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_SourceOver)
+            spot_bg = QColor(26, 26, 28, 230) if is_dark else QColor(248, 248, 248, 230)
+            painter.setBrush(QBrush(spot_bg))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(QRectF(spot), 10, 10)
+
+            # Blue spotlight border
             painter.setPen(QPen(QColor(10, 132, 255, 220), 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(QRectF(spot), 10, 10)
