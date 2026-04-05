@@ -25,6 +25,8 @@ class ThemeMixin:
         # If edit profile page is open, refresh its glow colour and photo
         if self._content_stack.currentIndex() == 6:
             self._apply_profile_page_glow()
+            self._apply_profile_btn_style()
+            self._apply_overlay_cb_style()
             # Only swap to default logo if no custom photo is set
             if not self._pending_profile.get("logo_path") and not self._logo_path:
                 self._reload_profile_page_photo()

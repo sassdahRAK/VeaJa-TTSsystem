@@ -106,6 +106,24 @@ _KEEP_FRONT_INTERVAL_MS = 500
 
 
 def _is_dark_mode() -> bool:
+    """Detect system dark mode.
+
+    On Windows, reads the registry key that Windows itself uses —
+    QPalette is unreliable on Windows 11 and can return wrong values.
+    Falls back to QPalette on other platforms.
+    """
+    if platform.system() == "Windows":
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            )
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            winreg.CloseKey(key)
+            return val == 0   # 0 → dark mode, 1 → light mode
+        except Exception:
+            pass
     app = QApplication.instance()
     if app is None:
         return False
@@ -130,7 +148,7 @@ class _LogoCircle(QWidget):
     # ── Load helpers ──────────────────────────────────────────────────────────
 
     def _load_png(self, dark: bool | None = None):
-        """Load bundled Veaja logo (dark/light variant)."""
+        """Load bundled Veaja logo PNG (dark bg for dark mode, light bg for light mode)."""
         if dark is None:
             dark = _is_dark_mode()
         name = "logo_light.png" if dark else "logo_dark.png"
@@ -607,13 +625,15 @@ class OverlayWidget(QWidget):
     def apply_profile(self, profile: dict):
         """
         Called by AppController when user saves their profile.
-        Swaps the overlay logo to their custom avatar, or resets to default.
+        If 'overlay_use_profile_photo' is True and a custom logo exists,
+        the overlay shows the user's profile photo; otherwise default logo.
         """
         logo_path = profile.get("logo_path")
-        if logo_path and os.path.exists(logo_path):
+        use_as_overlay = profile.get("overlay_use_profile_photo", False)
+        if use_as_overlay and logo_path and os.path.exists(logo_path):
             self._logo.load_custom(logo_path)
         else:
-            self._logo.reset_to_default()
+            self._logo.reset_to_default(self._dark)
 
     def show_near(self, screen_x: int, screen_y: int):
         """

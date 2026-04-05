@@ -35,6 +35,19 @@ class ReadState(Enum):
 
 
 def _is_dark_mode() -> bool:
+    import platform as _platform
+    if _platform.system() == "Windows":
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            )
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            winreg.CloseKey(key)
+            return val == 0   # 0 → dark mode, 1 → light mode
+        except Exception:
+            pass
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance()
     if app is None:

@@ -29,8 +29,17 @@ def _make_square_pixmap(path: str, size: int) -> QPixmap | None:
     except Exception:
         dpr = 1.0
     phys = int(size * dpr)
+    # Scale so the shorter side fills phys (expanding), then centre-crop to
+    # exactly phys×phys.  Without the crop, KeepAspectRatioByExpanding leaves
+    # the longer side larger than phys, producing a non-square pixmap whose
+    # logical height (after setDevicePixelRatio) exceeds `size` — causing the
+    # blank white gap visible below portrait photos inside the profile frame.
     px = raw.scaled(phys, phys,
                     Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                     Qt.TransformationMode.SmoothTransformation)
+    if px.width() != phys or px.height() != phys:
+        x = (px.width()  - phys) // 2
+        y = (px.height() - phys) // 2
+        px = px.copy(x, y, phys, phys)
     px.setDevicePixelRatio(dpr)
     return px

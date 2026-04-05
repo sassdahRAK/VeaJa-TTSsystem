@@ -2,12 +2,29 @@ import os
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QLineEdit, QGraphicsDropShadowEffect
+    QScrollArea, QFrame, QLineEdit, QGraphicsDropShadowEffect, QCheckBox
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QFont, QColor, QPixmap, QPainter, QIcon
+from PyQt6.QtSvg import QSvgRenderer
 
 from gui._window_shared import ASSETS, _make_square_pixmap  # noqa: F401
+
+
+def _make_icon_pixmap(svg_str: str, size: int = 16) -> QPixmap:
+    """Render an inline SVG string into a QPixmap."""
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance()
+    dpr = app.primaryScreen().devicePixelRatio() if (app and app.primaryScreen()) else 1.0
+    phys = int(size * dpr)
+    px = QPixmap(phys, phys)
+    px.fill(Qt.GlobalColor.transparent)
+    renderer = QSvgRenderer(svg_str.encode())
+    p = QPainter(px)
+    renderer.render(p)
+    p.end()
+    px.setDevicePixelRatio(dpr)
+    return px
 
 
 class ProfileMixin:
@@ -88,32 +105,117 @@ class ProfileMixin:
         b_lay.addLayout(name_row)
         b_lay.addSpacing(20)
 
-        # "Change profile" label
-        chg_row = QHBoxLayout()
-        chg_row.addStretch()
-        chg_lbl = QLabel("Change profile")
-        chg_lbl.setObjectName("settingsLabel")
-        chg_row.addWidget(chg_lbl)
-        chg_row.addStretch()
-        b_lay.addLayout(chg_row)
+        # Section divider
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setObjectName("profileDivider")
+        divider.setStyleSheet("QFrame#profileDivider { border: none; border-top: 1px solid rgba(128,128,128,0.25); margin: 0 100px; }")
+        b_lay.addWidget(divider)
+        b_lay.addSpacing(18)
+
+        # Section heading: small camera icon + "Profile Photo"
+        _cam_svg = (
+            '<svg viewBox="0 0 20 18" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M7 2l-1.5 2H3a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6'
+            'a2 2 0 0 0-2-2h-2.5L13 2H7z" stroke="#888" stroke-width="1.4"'
+            ' fill="none" stroke-linejoin="round"/>'
+            '<circle cx="10" cy="10" r="3" stroke="#888" stroke-width="1.4" fill="none"/>'
+            '</svg>'
+        )
+        heading_row = QHBoxLayout()
+        heading_row.setSpacing(7)
+        heading_row.addStretch()
+        cam_lbl = QLabel()
+        cam_lbl.setPixmap(_make_icon_pixmap(_cam_svg, 16))
+        cam_lbl.setFixedSize(16, 16)
+        heading_row.addWidget(cam_lbl)
+        heading_lbl = QLabel("Profile Photo")
+        heading_lbl.setObjectName("profileSectionHeading")
+        heading_lbl.setStyleSheet(
+            "QLabel#profileSectionHeading { font-size: 11px; font-weight: 600;"
+            " letter-spacing: 0.8px; text-transform: uppercase;"
+            " color: rgba(180,180,180,0.75); }"
+        )
+        heading_row.addWidget(heading_lbl)
+        heading_row.addStretch()
+        b_lay.addLayout(heading_row)
         b_lay.addSpacing(14)
 
-        # Buttons: upload photo | set default
+        # Hint text
+        hint_row = QHBoxLayout()
+        hint_row.addStretch()
+        hint_lbl = QLabel("Click the photo above to browse, or use the options below.")
+        hint_lbl.setObjectName("profileHint")
+        hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint_lbl.setWordWrap(True)
+        hint_lbl.setStyleSheet(
+            "QLabel#profileHint { font-size: 11px; color: rgba(140,140,140,0.8); }"
+        )
+        hint_row.addWidget(hint_lbl)
+        hint_row.addStretch()
+        b_lay.addLayout(hint_row)
+        b_lay.addSpacing(16)
+
+        # SVG icons for buttons
+        _upload_svg = (
+            '<svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">'
+            '<polyline points="9,12 9,3" stroke="#aaa" stroke-width="1.6"'
+            ' stroke-linecap="round"/>'
+            '<polyline points="5,7 9,3 13,7" stroke="#aaa" stroke-width="1.6"'
+            ' fill="none" stroke-linejoin="round" stroke-linecap="round"/>'
+            '<path d="M3 13v1a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-1"'
+            ' stroke="#aaa" stroke-width="1.6" fill="none" stroke-linecap="round"/>'
+            '</svg>'
+        )
+        _reset_svg = (
+            '<svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M14 9 A5 5 0 1 1 11.5 4.2" stroke="#aaa" stroke-width="1.6"'
+            ' fill="none" stroke-linecap="round"/>'
+            '<polyline points="11,2 12.8,4.4 10,5.2" stroke="#aaa" stroke-width="1.6"'
+            ' fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+            '</svg>'
+        )
+
+        # Buttons: Upload Photo | Set Default
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
         btn_row.addStretch()
-        upload_btn = QPushButton("upload photo")
-        upload_btn.setObjectName("btnOutline")
-        upload_btn.setFixedHeight(32)
-        upload_btn.clicked.connect(self._on_profile_choose_photo)
-        btn_row.addWidget(upload_btn)
-        default_btn = QPushButton("set default")
-        default_btn.setObjectName("btnOutline")
-        default_btn.setFixedHeight(32)
-        default_btn.clicked.connect(self._on_profile_reset_photo)
-        btn_row.addWidget(default_btn)
+
+        self._upload_btn = QPushButton("  Upload Photo")
+        self._upload_btn.setObjectName("profileActionBtn")
+        self._upload_btn.setFixedSize(148, 38)
+        self._upload_btn.setIconSize(QSize(16, 16))
+        self._upload_btn.setIcon(self._profile_btn_icon(_upload_svg))
+        self._upload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._upload_btn.clicked.connect(self._on_profile_choose_photo)
+        btn_row.addWidget(self._upload_btn)
+
+        self._default_btn = QPushButton("  Set Default")
+        self._default_btn.setObjectName("profileActionBtn")
+        self._default_btn.setFixedSize(132, 38)
+        self._default_btn.setIconSize(QSize(16, 16))
+        self._default_btn.setIcon(self._profile_btn_icon(_reset_svg))
+        self._default_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._default_btn.clicked.connect(self._on_profile_reset_photo)
+        btn_row.addWidget(self._default_btn)
+
         btn_row.addStretch()
         b_lay.addLayout(btn_row)
+        self._apply_profile_btn_style()
+        b_lay.addSpacing(16)
+
+        # "Set to overlay profile" checkbox — only visible when custom photo is set
+        cb_row = QHBoxLayout()
+        cb_row.addStretch()
+        self._overlay_cb = QCheckBox("Set as overlay profile")
+        self._overlay_cb.setObjectName("overlayProfileCb")
+        self._overlay_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._overlay_cb.setVisible(False)   # hidden until a custom photo is uploaded
+        self._overlay_cb.toggled.connect(self._on_overlay_cb_toggled)
+        cb_row.addWidget(self._overlay_cb)
+        cb_row.addStretch()
+        b_lay.addLayout(cb_row)
+        self._apply_overlay_cb_style()
 
         b_lay.addStretch()
         scroll.setWidget(body)
@@ -132,12 +234,106 @@ class ProfileMixin:
         self._profile_name_edit.setText(current_name)
         self._reload_profile_page_photo()
         self._apply_profile_page_glow()
+        # Restore checkbox state from saved profile
+        if hasattr(self, "_overlay_cb"):
+            has_custom = bool(self._pending_profile.get("logo_path") or self._logo_path)
+            use_overlay = bool(self._pending_profile.get("overlay_use_profile_photo", False))
+            self._overlay_cb.blockSignals(True)
+            self._overlay_cb.setChecked(use_overlay)
+            self._overlay_cb.setVisible(has_custom)
+            self._overlay_cb.blockSignals(False)
         for btn, _ in self._nav_btns:
             btn.setChecked(False)
         # Hide the sidebar edit icon while on profile page
         if self._edit_icon_lbl is not None:
             self._edit_icon_lbl.setVisible(False)
         self._content_stack.setCurrentIndex(6)
+
+    def _profile_btn_icon(self, svg_str: str):
+        """Return a QIcon from an inline SVG string."""
+        return QIcon(_make_icon_pixmap(svg_str, 16))
+
+    def _apply_profile_btn_style(self):
+        """Apply theme-aware styling to the profile action buttons."""
+        if not hasattr(self, "_upload_btn"):
+            return
+        if self._dark:
+            style = (
+                "QPushButton#profileActionBtn {"
+                " background: rgba(255,255,255,0.06);"
+                " color: #e0e0e0;"
+                " border: 1px solid rgba(255,255,255,0.15);"
+                " border-radius: 10px;"
+                " font-size: 13px; font-weight: 500;"
+                " padding-left: 4px; }"
+                "QPushButton#profileActionBtn:hover {"
+                " background: rgba(255,255,255,0.12);"
+                " border-color: rgba(255,255,255,0.3); }"
+                "QPushButton#profileActionBtn:pressed {"
+                " background: rgba(255,255,255,0.04); }"
+            )
+        else:
+            style = (
+                "QPushButton#profileActionBtn {"
+                " background: rgba(0,0,0,0.04);"
+                " color: #2c2c2c;"
+                " border: 1px solid rgba(0,0,0,0.15);"
+                " border-radius: 10px;"
+                " font-size: 13px; font-weight: 500;"
+                " padding-left: 4px; }"
+                "QPushButton#profileActionBtn:hover {"
+                " background: rgba(0,0,0,0.09);"
+                " border-color: rgba(0,0,0,0.25); }"
+                "QPushButton#profileActionBtn:pressed {"
+                " background: rgba(0,0,0,0.02); }"
+            )
+        for btn in (self._upload_btn, self._default_btn):
+            btn.setStyleSheet(style)
+
+    def _apply_overlay_cb_style(self):
+        """Theme-aware style for the overlay checkbox."""
+        if not hasattr(self, "_overlay_cb"):
+            return
+        import os as _os
+        check_icon = _os.path.join(ASSETS, "check_light.svg").replace("\\", "/")
+        if self._dark:
+            txt   = "rgba(200,200,200,0.85)"
+            box   = "rgba(255,255,255,0.15)"
+            chk   = "#e05a2b"
+            hover = "rgba(255,255,255,0.22)"
+        else:
+            txt   = "rgba(60,60,60,0.85)"
+            box   = "rgba(0,0,0,0.18)"
+            chk   = "#e05a2b"
+            hover = "rgba(0,0,0,0.25)"
+        self._overlay_cb.setStyleSheet(f"""
+QCheckBox#overlayProfileCb {{
+    color: {txt};
+    font-size: 12px;
+    spacing: 8px;
+}}
+QCheckBox#overlayProfileCb::indicator {{
+    width: 16px; height: 16px;
+    border: 1.5px solid {box};
+    border-radius: 4px;
+    background: transparent;
+}}
+QCheckBox#overlayProfileCb::indicator:hover {{
+    border-color: {hover};
+}}
+QCheckBox#overlayProfileCb::indicator:checked {{
+    background: {chk};
+    border-color: {chk};
+    image: url({check_icon});
+}}
+""")
+
+    def _on_overlay_cb_toggled(self, checked: bool):
+        """Immediately preview the overlay logo change while on the profile page."""
+        self._pending_profile["overlay_use_profile_photo"] = checked
+        logo_path = self._pending_profile.get("logo_path") or self._logo_path
+        # Push live preview to the overlay widget via the profile_save_requested signal
+        self.profile_save_requested.emit(dict(self._pending_profile))
 
     def _apply_profile_page_glow(self):
         """Apply theme-aware blur glow to the large profile photo frame and name input."""
@@ -166,11 +362,10 @@ class ProfileMixin:
         if hasattr(self, "_profile_name_edit"):
             txt   = "#ffffff" if self._dark else "#1a1a1a"
             bg_in = "transparent"
-            uline = "#555555" if self._dark else "#aaaaaa"
             self._profile_name_edit.setStyleSheet(
                 f"QLineEdit#profileNameEdit {{"
                 f" background: {bg_in}; color: {txt};"
-                f" border: none; border-bottom: 2px solid {uline};"
+                f" border: none;"
                 f" font-size: 20px; font-weight: 700; padding-bottom: 2px; }}"
             )
 
@@ -188,20 +383,44 @@ class ProfileMixin:
 
     def _on_profile_choose_photo(self):
         from PyQt6.QtWidgets import QFileDialog
+        from gui.photo_crop_dialog import PhotoCropDialog
+        import tempfile, os as _os
+
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose Avatar Image", "",
             "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
         )
-        if path:
-            self._pending_profile["logo_path"] = path
-            self._reload_profile_page_photo()
-            self._reload_header_logo(path)   # live preview in sidebar
+        if not path:
+            return
+
+        raw = QPixmap(path)
+        if raw.isNull():
+            return
+
+        # Open the editor dialog
+        dlg = PhotoCropDialog(raw, dark=self._dark, parent=self)
+        if dlg.exec() != PhotoCropDialog.DialogCode.Accepted:
+            return
+
+        # Save the edited result as a temp PNG and use it as the avatar path
+        edited = dlg.result_pixmap(512)
+        tmp_dir = tempfile.gettempdir()
+        save_path = _os.path.join(tmp_dir, "veaja_avatar_edited.png")
+        edited.save(save_path, "PNG")
+
+        self._pending_profile["logo_path"] = save_path
+        self._reload_profile_page_photo()
+        self._reload_header_logo(save_path)   # live preview in sidebar
+        # Show checkbox now that a custom photo exists
+        if hasattr(self, "_overlay_cb"):
+            self._overlay_cb.setVisible(True)
 
     def _on_profile_reset_photo(self):
         """Reset to factory defaults: name 'Veaja', built-in logo, no custom photo."""
         default_name = "Veaja"
         self._pending_profile["logo_path"] = None
         self._pending_profile["app_name"]  = default_name
+        self._pending_profile["overlay_use_profile_photo"] = False
         # Must explicitly clear stored path — _reload_header_logo(None) skips updating it
         self._logo_path = None
         # Restore profile page fields
@@ -210,6 +429,14 @@ class ProfileMixin:
         # Restore sidebar live preview to factory default
         self._title_label.setText(default_name)
         self._reload_header_logo()   # no arg → picks up self._logo_path = None → default img
+        # Hide and uncheck the overlay checkbox — no custom photo to use
+        if hasattr(self, "_overlay_cb"):
+            self._overlay_cb.blockSignals(True)
+            self._overlay_cb.setChecked(False)
+            self._overlay_cb.setVisible(False)
+            self._overlay_cb.blockSignals(False)
+        # Reset overlay logo to default immediately
+        self.profile_save_requested.emit(dict(self._pending_profile))
 
     def _on_profile_name_preview(self, text: str):
         """Live preview: update sidebar name label as user types."""

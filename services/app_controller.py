@@ -79,6 +79,9 @@ class AppController(QObject):
         self._main_window.mode_changed.connect(self._on_mode_changed)
         self._main_window.tour_requested.connect(self._show_tour)
 
+        # Profile page save (includes live checkbox toggle) → persist + update overlay
+        self._main_window.profile_save_requested.connect(self._on_profile_save_requested)
+
         # Profile changes → update UI
         self._profile.profile_changed.connect(self._on_profile_changed)
 
@@ -323,6 +326,7 @@ class AppController(QObject):
     def _show_terms_on_launch(self):
         dlg = TermsDialog(
             online_mode=self._tts.is_edge_available(),
+            dark=self._is_dark_mode(),
             parent=self._main_window,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.dont_show_again():
@@ -333,6 +337,7 @@ class AppController(QObject):
     def _show_terms(self):
         TermsDialog(
             online_mode=self._tts.is_edge_available(),
+            dark=self._is_dark_mode(),
             parent=self._main_window,
         ).exec()
 
@@ -349,6 +354,11 @@ class AppController(QObject):
         from gui.tour_overlay import TourOverlay
         tour = TourOverlay(self._main_window)
         tour.show()
+
+    def _on_profile_save_requested(self, profile: dict):
+        """Handles live saves from the profile page (e.g. overlay checkbox toggle).
+        Persists the profile to disk and immediately applies it to the overlay."""
+        self._profile.save(profile)   # triggers profile_changed → _on_profile_changed
 
     def _on_profile_changed(self, profile: dict):
         self._main_window.apply_profile(profile)
@@ -375,6 +385,19 @@ class AppController(QObject):
 
     @staticmethod
     def _is_dark_mode() -> bool:
+        import platform as _platform
+        if _platform.system() == "Windows":
+            try:
+                import winreg
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                )
+                val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                winreg.CloseKey(key)
+                return val == 0   # 0 → dark mode, 1 → light mode
+            except Exception:
+                pass
         from PyQt6.QtGui import QPalette
         app = QApplication.instance()
         if app is None:
