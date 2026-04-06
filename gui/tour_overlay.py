@@ -232,8 +232,8 @@ _TRAIN_CONTENT: dict[str, tuple[str, str]] = {
     ),
     "ctrl_r":         (
         "Select text  →  press Ctrl + R",
-        "Go to any window, select some text, then press Ctrl+R.\n"
-        "(Veaja will demo it for you in a moment…)",
+        "Go to any window, select some text, then press Ctrl+R.\n\n"
+        "Haven't tried yet? A demo will play in 8 seconds…",
     ),
     "ctrl_r_reading": (
         "Select text  →  press Ctrl + R",
@@ -273,12 +273,20 @@ _STEP_BADGES: dict[str, str] = {
     "done":           "All done!",
 }
 
-# Demo sentence spoken automatically during the Ctrl+R training phase
+# Demo sentence spoken automatically during the Ctrl+R training phase.
+# Played when the user does not press Ctrl+R within the waiting window,
+# or when _auto_read() is triggered by the timeout.
 _DEMO_TEXT = (
     "Hello! This is Veaja reading your selected text aloud. "
     "Just select any text in any window and press Ctrl R — "
     "Veaja will read it instantly."
 )
+
+# How long (ms) to wait for the user to try Ctrl+R before auto-demoing.
+# 8 seconds gives them enough time to read the instructions and attempt it.
+_CTRL_R_WAIT_MS  = 8_000
+# Safety fallback — advance past the step even if TTS hangs
+_CTRL_R_TOTAL_MS = 18_000
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -546,10 +554,14 @@ class _DragTrainer(QWidget):
             )
 
         elif phase == "ctrl_r":
-            # Auto-demo reading after 2 s; advance regardless after 10 s
-            QTimer.singleShot(2000, self._auto_read)
+            # Give the user _CTRL_R_WAIT_MS to try pressing Ctrl+R themselves.
+            # If they don't, _auto_read() plays the demo sentence so they can
+            # still see word-highlighting even if they skipped the real gesture.
+            # The safety fallback at _CTRL_R_TOTAL_MS advances the tour even if
+            # TTS is slow or offline, so training never gets stuck here.
+            QTimer.singleShot(_CTRL_R_WAIT_MS, self._auto_read)
             QTimer.singleShot(
-                10_000,
+                _CTRL_R_TOTAL_MS,
                 lambda: self._go("move")
                 if self._phase in ("ctrl_r", "ctrl_r_reading") else None,
             )

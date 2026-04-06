@@ -407,9 +407,25 @@ class AppController(QObject):
 
         Updates the TTS engine mode and refreshes the voice selector so it
         shows only voices relevant to the new mode.
+
+        voice_index clamp
+        -----------------
+        Online mode has 8 voices; offline mode may have fewer system voices.
+        A saved voice_index of 7 would be out of range after switching to
+        offline. We clamp it to 0 and persist the correction so the UI and
+        the engine always stay in sync.
         """
         self._tts.set_forced_offline(not online)
-        self._main_window.populate_voices(self._tts.get_voices())
+        voices = self._tts.get_voices()
+        self._main_window.populate_voices(voices)
+
+        # Clamp the saved voice_index to the valid range for the new mode
+        if voices:
+            profile = self._profile.get()
+            voice_index = profile.get("voice_index", 0)
+            if not isinstance(voice_index, int) or voice_index >= len(voices):
+                profile["voice_index"] = 0
+                self._profile.save(profile)
 
     def _on_settings_save(self, settings: dict) -> None:
         """Merge the changed settings into the user profile and persist to disk."""
@@ -557,9 +573,13 @@ class AppController(QObject):
                     winreg.HKEY_CURRENT_USER,
                     r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
                 )
-                val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-                winreg.CloseKey(key)
-                return val == 0   # 0 → dark mode enabled
+                try:
+                    # CloseKey is in finally so it always runs even if
+                    # QueryValueEx raises — prevents a handle leak.
+                    val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                    return val == 0   # 0 → dark mode enabled
+                finally:
+                    winreg.CloseKey(key)
             except Exception:
                 pass   # registry key absent or unreadable — fall through
 
