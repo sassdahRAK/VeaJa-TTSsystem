@@ -389,7 +389,11 @@ class AppController(QObject):
 
     def _show_tour(self):
         from gui.tour_overlay import TourOverlay
-        tour = TourOverlay(self._main_window, overlay_widget=self._overlay)
+        tour = TourOverlay(
+            self._main_window,
+            overlay_widget=self._overlay,
+            speak_callback=self._speak,
+        )
         tour.show()
 
     def _on_profile_save_requested(self, profile: dict):
