@@ -1,76 +1,110 @@
 """
-AppController — central mediator that wires all components together.
+services/app_controller.py — Veaja Application Controller
+==========================================================
 
-Lifecycle:
-  splash → main_window shown → clipboard/selection monitor active → overlay reacts
+Central mediator that wires every component together and manages the
+overall application lifecycle.
+
+Lifecycle
+---------
+  splash  →  start()  →  main window shown
+                       →  clipboard / selection monitor active
+                       →  overlay pill reacts to text + hotkeys
+
+Component graph
+---------------
+  AppController
+    ├── TTSEngine           — speaks text via edge-tts (online) or pyttsx3 (offline)
+    ├── AudioHistory        — persists the last N spoken texts
+    ├── ProfileManager      — loads / saves user preferences to disk
+    ├── MainWindow          — PyQt6 UI (dashboard, settings, history, FAQ)
+    ├── OverlayWidget       — floating pill overlay (always on top)
+    ├── TrayIcon            — system tray icon + notifications
+    ├── SelectionMonitor    — global Ctrl+C / Ctrl+R hotkey listener
+    ├── WindowManager       — controls overlay ↔ main window visibility rules
+    └── NetworkMonitor      — background internet connectivity checker
 """
 
 import platform
-from PyQt6.QtWidgets import QApplication, QDialog
-from PyQt6.QtCore import QObject, QTimer
 
-from core.tts_engine import TTSEngine
+from PyQt6.QtWidgets import QApplication, QDialog
+from PyQt6.QtCore    import QObject, QTimer
+
+from core.tts_engine        import TTSEngine
 from core.selection_monitor import SelectionMonitor
-from core.audio_history import AudioHistory
-from core.profile import ProfileManager
-from core.language import filter_for_tts, language_display_name
-from core.network_monitor import NetworkMonitor
-from gui.main_window import MainWindow, ReadState
-from gui.overlay_widget import OverlayWidget
-from gui.tray_icon import TrayIcon
-from gui.terms_dialog import TermsDialog
-from gui.profile_dialog import ProfileDialog
+from core.audio_history     import AudioHistory
+from core.profile           import ProfileManager
+from core.language          import filter_for_tts, language_display_name
+from core.network_monitor   import NetworkMonitor
+from gui.main_window        import MainWindow, ReadState
+from gui.overlay_widget     import OverlayWidget
+from gui.tray_icon          import TrayIcon
+from gui.terms_dialog       import TermsDialog
+from gui.profile_dialog     import ProfileDialog
 from services.window_manager import WindowManager
 
 
 class AppController(QObject):
+    """
+    Wires all Veaja components together and owns the top-level event routing.
+
+    Instantiated once in main.py after the splash screen closes.
+    Call start() to display the main window and activate all monitors.
+    """
+
     def __init__(self, app: QApplication):
         super().__init__()
-        self._app   = app
-        self._tts   = TTSEngine()
-        self._audio = AudioHistory()
+
+        self._app     = app
+        self._tts     = TTSEngine()
+        self._audio   = AudioHistory()
         self._profile = ProfileManager(parent=self)
 
-        # Build components (not shown yet)
+        # ── Build UI components (not yet visible) ──────────────────────────────
         self._main_window = MainWindow(tts_engine=self._tts)
         self._overlay     = OverlayWidget()
         self._tray        = TrayIcon(dark_mode=self._is_dark_mode())
         self._monitor     = SelectionMonitor()
 
-        # WindowManager — controls overlay ↔ main-window visibility rules
+        # WindowManager enforces the overlay ↔ main-window visibility rule:
+        # when the overlay pill is shown, the main window is hidden, and vice versa.
         self._wm = WindowManager(self._main_window, self._overlay, parent=self)
+
+        # Tracks the text most recently sent to TTS for the ⟳ restart feature
         self._current_text: str = ""
 
-        # Network monitor — checks connectivity every 10 s in a background thread
+        # NetworkMonitor polls internet connectivity every 10 s in a background thread
         self._net_monitor = NetworkMonitor(parent=self, interval_ms=10_000)
 
         self._wire_signals()
         self._populate_voices()
-        # Reflect the initial online/offline state in the UI
+
+        # Reflect the correct online / offline state in the UI immediately
         self._main_window.set_online_mode(self._tts.is_edge_available())
 
-        # Mac: keep running when all windows are closed (live in tray)
+        # macOS: keep the process alive when all windows are closed (live in tray)
         if platform.system() == "Darwin":
             app.setQuitOnLastWindowClosed(False)
 
-    # ------------------------------------------------------------------ #
-    # Signal wiring
-    # ------------------------------------------------------------------ #
+    # ── Signal wiring ─────────────────────────────────────────────────────────
 
-    def _wire_signals(self):
-        # Selection monitor → overlay + main window
+    def _wire_signals(self) -> None:
+        """Connect every Qt signal to its handler."""
+
+        # ── SelectionMonitor ──────────────────────────────────────────────────
+        # Ctrl+C with selected text → load text into overlay + main window
         self._monitor.text_ready.connect(self._on_text_ready)
-        # Ctrl+R → read clipboard directly
+        # Ctrl+R → immediately read whatever is in the clipboard
         self._monitor.read_clipboard_hotkey.connect(self._on_read_hotkey)
 
-        # Overlay user actions
+        # ── Overlay pill user actions ──────────────────────────────────────────
         self._overlay.read_requested.connect(self._speak)
         self._overlay.stop_requested.connect(self._on_overlay_stop)
         self._overlay.hide_requested.connect(self._overlay.hide_overlay)
         self._overlay.settings_requested.connect(self._wm.show_main)
         self._overlay.reset_requested.connect(self._on_reset_requested)
 
-        # Main window user actions
+        # ── Main window user actions ───────────────────────────────────────────
         self._main_window.read_requested.connect(self._speak)
         self._main_window.stop_requested.connect(self._stop_speaking)
         self._main_window.pause_requested.connect(self._pause_speaking)
@@ -84,112 +118,146 @@ class AppController(QObject):
         self._main_window.settings_save_requested.connect(self._on_settings_save)
         self._main_window.tour_requested.connect(self._show_tour)
 
-        # Profile page save (includes live checkbox toggle) → persist + update overlay
-        self._main_window.profile_save_requested.connect(self._on_profile_save_requested)
+        # Profile page live save (e.g. overlay-show checkbox toggle)
+        self._main_window.profile_save_requested.connect(
+            self._on_profile_save_requested
+        )
 
-        # Profile changes → update UI
+        # ProfileManager emits profile_changed after every save → update UI
         self._profile.profile_changed.connect(self._on_profile_changed)
 
-        # Network monitor → auto-switch mode and update status label
-        self._net_monitor.connectivity_changed.connect(self._on_connectivity_changed)
+        # NetworkMonitor → auto-switch TTS mode + update status label
+        self._net_monitor.connectivity_changed.connect(
+            self._on_connectivity_changed
+        )
 
-        # Tray → always show main via WindowManager
+        # System tray → always show main window via WindowManager
         self._tray.show_window_requested.connect(self._wm.show_main)
         self._tray.quit_requested.connect(self._quit)
 
-    def _populate_voices(self):
+    def _populate_voices(self) -> None:
+        """Fetch available voices from the TTS engine and push them to the UI."""
         voices = self._tts.get_voices()
         self._main_window.populate_voices(voices)
 
-    # ------------------------------------------------------------------ #
-    # Public accessors (used by main.py)
-    # ------------------------------------------------------------------ #
+    # ── Public accessor ───────────────────────────────────────────────────────
 
     @property
-    def window_manager(self) -> "WindowManager":
+    def window_manager(self) -> WindowManager:
+        """Expose the WindowManager for main.py bootstrapping."""
         return self._wm
 
-    # ------------------------------------------------------------------ #
-    # Entry point (called by main.py after splash closes)
-    # ------------------------------------------------------------------ #
+    # ── Application entry point ───────────────────────────────────────────────
 
-    def start(self):
-        # Load and apply profile to all components
+    def start(self) -> None:
+        """
+        Called by main.py after the splash screen closes.
+
+        Loads the user profile, applies it to all components, shows the main
+        window, and (on first launch) presents the Terms dialog.
+        """
         profile = self._profile.load()
         self._main_window.apply_profile(profile)
         self._overlay.apply_profile(profile)
 
-        # Push the correct dark/light theme to the overlay at startup
-        # so it never relies on live QPalette detection alone.
+        # Push the saved dark/light theme to the overlay so it never relies
+        # solely on live QPalette detection at startup
         self._overlay.update_theme(self._is_dark_mode())
 
         self._wm.show_main()
 
-        # Show terms dialog on first launch
+        # First-launch: show Terms dialog after a short delay so the window
+        # is fully painted before the modal appears
         if not profile.get("terms_accepted", False):
             QTimer.singleShot(600, self._show_terms_on_launch)
 
-    # ------------------------------------------------------------------ #
-    # Text ready (from clipboard / selection)
-    # ------------------------------------------------------------------ #
+    # ── Text ready (Ctrl+C / selection monitor) ───────────────────────────────
 
-    def _on_text_ready(self, text: str):
+    def _on_text_ready(self, text: str) -> None:
+        """
+        Handle new text captured by the selection monitor (Ctrl+C).
+
+        Always stops any in-progress speech so the Read button starts fresh
+        rather than toggling into pause/resume mode on new content.
+        """
         from PyQt6.QtGui import QCursor
-        # New text always replaces the current session — stop whatever is playing
-        # so the Read button (and Ctrl+R) starts fresh instead of pause/resuming.
+
+        # Stop current playback so the next action is always a fresh read
         if self._tts.is_speaking() or self._tts.is_paused():
             self._tts.stop()
             self._on_speaking_finished()   # reset UI to IDLE immediately
+
         self._overlay.set_text(text, auto_show=False)
         self._main_window.set_text(text)
-        # Position rule: snap near the cursor ONLY on first appearance.
-        # If the overlay is already visible, leave it exactly where it is.
+
+        # Position rule: snap the pill near the cursor only on its first appearance.
+        # If the overlay is already visible, leave it where the user put it.
         if not self._overlay.isVisible():
             pos = QCursor.pos()
             self._overlay.show_near(pos.x(), pos.y())
         else:
             self._overlay.show_overlay()   # bring to front without moving
 
-    # ------------------------------------------------------------------ #
-    # Ctrl+R hotkey — read current clipboard immediately
-    # ------------------------------------------------------------------ #
+    # ── Ctrl+R hotkey — read clipboard immediately ────────────────────────────
 
-    def _on_read_hotkey(self):
+    def _on_read_hotkey(self) -> None:
         """
-        Ctrl+R behaviour:
-          1. SelectionMonitor already simulated Ctrl+C — clipboard has selected text.
-          2. If overlay is hidden → pop it up near the mouse cursor (top-left of selection).
-          3. Start reading immediately.
+        Handle the global Ctrl+R hotkey.
+
+        Flow:
+          1. SelectionMonitor already simulated Ctrl+C → clipboard holds the
+             selected text from whatever app the user is in.
+          2. Load that text into the overlay and main window.
+          3. Show the overlay pill near the cursor (first appearance only).
+          4. Start reading immediately.
         """
         from PyQt6.QtGui import QCursor
+
         text = QApplication.clipboard().text().strip()
         if not text:
             return
+
         self._main_window.set_text(text)
         self._overlay.set_text(text, auto_show=False)
-        # Position rule: snap near the cursor ONLY on first appearance.
-        # If the overlay is already visible, leave it exactly where it is.
+
+        # Same position rule as _on_text_ready
         if not self._overlay.isVisible():
             pos = QCursor.pos()
             self._overlay.show_near(pos.x(), pos.y())
         else:
-            self._overlay.show_overlay()   # bring to front without moving
+            self._overlay.show_overlay()
+
         self._speak(text)
 
-    # ------------------------------------------------------------------ #
-    # TTS
-    # ------------------------------------------------------------------ #
+    # ── TTS — speak ───────────────────────────────────────────────────────────
 
-    def _speak(self, text: str):
+    def _speak(self, text: str) -> None:
+        """
+        Speak ``text`` through the TTS engine.
+
+        Language protection
+        -------------------
+        The text is filtered to English before speaking.  If no English content
+        is found the user gets a tray notification and speech is aborted.
+        If mixed-language content is found, only the English portion is read
+        and the text boxes are updated to reflect exactly what will be spoken.
+
+        Word highlighting
+        -----------------
+        The ``on_word_highlight`` callback fires for every word boundary event
+        from the TTS engine, updating both the dashboard progress bar and the
+        overlay pill's karaoke display in real time.
+        """
         if not text.strip():
             return
 
-        # ── Language protection layer ─────────────────────────────────────────
-        # Filter text to the current TTS language (English mode by default).
-        # Never crashes — filter_for_tts always returns a safe result.
+        # ── Language filter ────────────────────────────────────────────────────
         try:
-            filtered, was_filtered, detected_lang = filter_for_tts(text, target_lang="en")
+            filtered, was_filtered, detected_lang = filter_for_tts(
+                text, target_lang="en"
+            )
         except Exception:
+            # filter_for_tts should never raise, but be safe
             filtered, was_filtered, detected_lang = text, False, "en"
 
         if not filtered.strip():
@@ -199,29 +267,29 @@ class AppController(QObject):
                 "Veaja — Language not supported",
                 f"No English text found in selection. "
                 f"(Detected: {lang_name})\n"
-                "Switch to Offline mode or select English text."
+                "Switch to Offline mode or select English text.",
             )
             return
 
         if was_filtered:
-            # Inform user that only the English portion will be read
+            # Inform the user that only the English portion will be read
             lang_name = language_display_name(detected_lang)
             self._tray.show_notification(
                 "Veaja — Mixed language",
-                f"Detected: {lang_name}. Reading English portions only."
+                f"Detected: {lang_name}. Reading English portions only.",
             )
-            # Update text box to show exactly what will be read
+            # Update text boxes to show exactly what will be spoken
             self._main_window.set_text(filtered)
             self._overlay.set_text(filtered, auto_show=False)
 
-        # ── Speak ─────────────────────────────────────────────────────────────
+        # ── Kick off TTS ───────────────────────────────────────────────────────
         self._current_text = filtered
         session_path = self._audio.next_session_path()
 
-        def _on_word(start: int, end: int):
-            # Dashboard: cumulative yellow progress bar
+        def _on_word(start: int, end: int) -> None:
+            # Dashboard: advance the cumulative yellow progress highlight
             self._main_window.highlight_word(start, end)
-            # Overlay pill: karaoke display (works even in PDFs / Word)
+            # Overlay pill: karaoke word-by-word highlight (works in any app)
             self._overlay.set_current_word(start, end)
 
         try:
@@ -237,28 +305,40 @@ class AppController(QObject):
                 session_path      = session_path,
             )
         except Exception as exc:
-            # Catch any unexpected TTS startup failure — never crash the app
+            # Catch unexpected TTS startup failures — the app must never crash
             self._on_speaking_finished()
             self._tray.show_notification("Veaja — TTS error", str(exc))
 
-    def _stop_speaking(self):
+    # ── TTS control ───────────────────────────────────────────────────────────
+
+    def _stop_speaking(self) -> None:
+        """Stop playback and reset all UI state to IDLE."""
         self._tts.stop()
         self._on_speaking_finished()
 
-    def _pause_speaking(self):
+    def _pause_speaking(self) -> None:
+        """
+        Pause if the engine supports it; fall back to stop for pyttsx3 (offline).
+        UI update is handled by the on_paused callback, not here.
+        """
         if self._tts.supports_pause():
             self._tts.pause()
-            # UI update happens via on_paused callback from the worker signal
         else:
-            # pyttsx3 has no pause — treat as stop
+            # pyttsx3 has no native pause — treat as a full stop
             self._stop_speaking()
 
-    def _resume_speaking(self):
+    def _resume_speaking(self) -> None:
+        """Resume from a paused state. UI update handled by on_resumed callback."""
         self._tts.resume()
-        # UI update happens via on_resumed callback
 
-    def _on_overlay_stop(self):
-        """Overlay click during active state — pause if speaking, resume if paused."""
+    def _on_overlay_stop(self) -> None:
+        """
+        Handle a tap on the overlay pill while TTS is active.
+
+        • Speaking  → pause
+        • Paused    → resume
+        • Idle      → stop (safety fallback)
+        """
         if self._tts.is_paused():
             self._resume_speaking()
         elif self._tts.is_speaking():
@@ -266,79 +346,94 @@ class AppController(QObject):
         else:
             self._stop_speaking()
 
-    def _on_reset_requested(self):
-        """⟳ button — stop current reading and restart from the beginning."""
+    def _on_reset_requested(self) -> None:
+        """
+        Handle the ⟳ reset button on the overlay pill.
+
+        Stops the current read and restarts from the beginning of the same text
+        after a 200 ms delay to allow the TTS engine to clean up gracefully.
+        """
         if not self._current_text:
             return
         self._tts.stop()
         self._on_speaking_finished()
-        # Small delay so the stop completes cleanly before re-starting
         QTimer.singleShot(200, lambda: self._speak(self._current_text))
 
-    # ── TTS lifecycle callbacks ───────────────────────────────────────────────
+    # ── TTS lifecycle callbacks ────────────────────────────────────────────────
 
-    def _on_preparing_speech(self):
+    def _on_preparing_speech(self) -> None:
+        """TTS engine is fetching / synthesising audio (not yet playing)."""
         self._overlay.set_processing(True)
         self._main_window.set_read_state(ReadState.PROCESSING)
 
-    def _on_speaking_started(self):
+    def _on_speaking_started(self) -> None:
+        """Audio playback has begun."""
         self._overlay.set_processing(False)
         self._overlay.set_speaking(True)
         self._main_window.set_read_state(ReadState.SPEAKING)
         self._main_window.mark_reading_started(self._current_text)
 
-    def _on_speaking_paused(self):
+    def _on_speaking_paused(self) -> None:
+        """Audio playback has been paused."""
         self._overlay.set_speaking(False)
         self._overlay.set_paused(True)
         self._main_window.set_read_state(ReadState.PAUSED)
 
-    def _on_speaking_resumed(self):
+    def _on_speaking_resumed(self) -> None:
+        """Audio playback has resumed from pause."""
         self._overlay.set_paused(False)
         self._overlay.set_speaking(True)
         self._main_window.set_read_state(ReadState.SPEAKING)
 
-    def _on_speaking_finished(self):
+    def _on_speaking_finished(self) -> None:
+        """Audio playback has ended (naturally or was stopped)."""
         self._overlay.set_processing(False)
         self._overlay.set_speaking(False)
         self._overlay.set_paused(False)
         self._main_window.set_read_state(ReadState.IDLE)
         self._main_window.clear_highlight()
-        self._main_window.mark_reading_started("")   # nothing playing now
+        self._main_window.mark_reading_started("")   # nothing is playing now
 
-    def _on_speaking_error(self, msg: str):
+    def _on_speaking_error(self, msg: str) -> None:
+        """TTS raised an error — reset UI and show a tray notification."""
         self._on_speaking_finished()
         self._tray.show_notification("Veaja — TTS error", msg)
 
-    # ------------------------------------------------------------------ #
-    # Window management
-    # ------------------------------------------------------------------ #
+    # ── Settings & mode ───────────────────────────────────────────────────────
 
-    def _on_mode_changed(self, online: bool):
-        """User toggled Online/Offline in the dashboard."""
+    def _on_mode_changed(self, online: bool) -> None:
+        """
+        User toggled the Online / Offline switch in the Settings page.
+
+        Updates the TTS engine mode and refreshes the voice selector so it
+        shows only voices relevant to the new mode.
+        """
         self._tts.set_forced_offline(not online)
-        # Refresh voice list to show the right voices for the new mode
         self._main_window.populate_voices(self._tts.get_voices())
 
-    def _on_settings_save(self, settings: dict):
-        """Persist voice settings into the user profile on disk."""
+    def _on_settings_save(self, settings: dict) -> None:
+        """Merge the changed settings into the user profile and persist to disk."""
         profile = self._profile.get()
         profile.update(settings)
         self._profile.save(profile)
 
-    def _on_connectivity_changed(self, is_online: bool):
-        """NetworkMonitor detected an internet state change.
-
-        - Updates the status label in the settings page (blue/red message).
-        - When going offline: forces the TTS engine to offline mode immediately
-          so any in-progress or next speech attempt uses pyttsx3 (no crash).
-        - When coming back online: restores online mode only if edge_tts is
-          available; the user can still manually switch back via the checkbox.
+    def _on_connectivity_changed(self, is_online: bool) -> None:
         """
-        # Update the status label and lock/unlock the online checkbox
+        NetworkMonitor detected an internet state change.
+
+        Going offline:
+          • Forces TTS to offline mode immediately to prevent edge-tts crashes.
+          • Updates the status label in the Settings page.
+
+        Coming back online:
+          • Restores online mode if edge-tts is available.
+          • Refreshes the voice list so online voices appear again.
+        """
+        # Update the status label and lock / unlock the online checkbox
         self._main_window.update_connection_status(is_online)
 
         if not is_online:
-            # Auto-switch TTS to offline to prevent network-related crashes
+            # Auto-switch to offline to avoid network errors on next read
             self._tts.set_forced_offline(True)
             self._main_window.populate_voices(self._tts.get_voices())
         else:
@@ -348,19 +443,29 @@ class AppController(QObject):
                 self._main_window.set_online_mode(True)
                 self._main_window.populate_voices(self._tts.get_voices())
 
-    def _on_theme_changed(self, dark: bool):
+    def _on_theme_changed(self, dark: bool) -> None:
+        """
+        User toggled dark / light mode.
+
+        Updates the tray icon, the overlay pill colour scheme, and persists
+        the preference so it survives app restarts.
+        """
         self._tray.update_icon(dark)
         self._overlay.update_theme(dark)
-        # Persist the user's theme choice so it survives app restarts
+
         profile = self._profile.get()
         profile["dark_mode"] = dark
         self._profile.save(profile)
 
-    # ------------------------------------------------------------------ #
-    # Terms dialog
-    # ------------------------------------------------------------------ #
+    # ── Terms of service ──────────────────────────────────────────────────────
 
-    def _show_terms_on_launch(self):
+    def _show_terms_on_launch(self) -> None:
+        """
+        Show the Terms dialog on first launch.
+
+        If the user accepts and ticks "Don't show again", the preference is
+        persisted so the dialog never appears again.
+        """
         dlg = TermsDialog(
             online_mode=self._tts.is_edge_available(),
             dark=self._is_dark_mode(),
@@ -371,24 +476,31 @@ class AppController(QObject):
             profile["terms_accepted"] = True
             self._profile.save(profile)
 
-    def _show_terms(self):
+    def _show_terms(self) -> None:
+        """Show the Terms dialog on demand (from the sidebar link)."""
         TermsDialog(
             online_mode=self._tts.is_edge_available(),
             dark=self._is_dark_mode(),
             parent=self._main_window,
         ).exec()
 
-    # ------------------------------------------------------------------ #
-    # Profile dialog
-    # ------------------------------------------------------------------ #
+    # ── Profile ───────────────────────────────────────────────────────────────
 
-    def _show_profile_dialog(self):
+    def _show_profile_dialog(self) -> None:
+        """Open the modal profile editor. Saves on Accepted."""
         dlg = ProfileDialog(self._profile.get(), parent=self._main_window)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._profile.save(dlg.get_profile())
 
-    def _show_tour(self):
+    def _show_tour(self) -> None:
+        """
+        Launch the interactive tutorial overlay.
+
+        Passes the overlay pill and TTS callback so the tutorial can show the
+        real pill during the "Get Started" interactive training phase.
+        """
         from gui.tour_overlay import TourOverlay
+
         tour = TourOverlay(
             self._main_window,
             overlay_widget=self._overlay,
@@ -396,37 +508,48 @@ class AppController(QObject):
         )
         tour.show()
 
-    def _on_profile_save_requested(self, profile: dict):
-        """Handles live saves from the profile page (e.g. overlay checkbox toggle).
-        Persists the profile to disk and immediately applies it to the overlay."""
-        self._profile.save(profile)   # triggers profile_changed → _on_profile_changed
+    def _on_profile_save_requested(self, profile: dict) -> None:
+        """
+        Handle a live profile save from the profile page.
 
-    def _on_profile_changed(self, profile: dict):
+        The profile_changed signal fired by ProfileManager will propagate the
+        update to the overlay and main window automatically.
+        """
+        self._profile.save(profile)   # emits profile_changed → _on_profile_changed
+
+    def _on_profile_changed(self, profile: dict) -> None:
+        """Apply an updated profile to all components that care about it."""
         self._main_window.apply_profile(profile)
-        self._overlay.apply_profile(profile)        # swap overlay logo ↔ user avatar
+        self._overlay.apply_profile(profile)   # swaps logo ↔ user avatar on pill
+
+        # Update the tray tooltip to reflect a custom app name if set
         name = profile.get("app_name", "Veaja")
         try:
             self._tray._tray.setToolTip(f"{name} — running")
         except Exception:
             pass
 
-    # ------------------------------------------------------------------ #
-    # Quit
-    # ------------------------------------------------------------------ #
+    # ── Quit ──────────────────────────────────────────────────────────────────
 
-    def _quit(self):
-        self._monitor.stop()
-        self._tts.stop()
-        self._tray.hide()
+    def _quit(self) -> None:
+        """Gracefully shut down all background components before exiting."""
+        self._monitor.stop()   # stop the global hotkey listener thread
+        self._tts.stop()       # stop any in-progress TTS playback
+        self._tray.hide()      # remove the system tray icon
         QApplication.quit()
 
-    # ------------------------------------------------------------------ #
-    # Helpers
-    # ------------------------------------------------------------------ #
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _is_dark_mode() -> bool:
+        """
+        Detect whether the OS is currently in dark mode.
+
+        Windows: reads the registry key AppsUseLightTheme (0 = dark, 1 = light).
+        Other:   falls back to QPalette window lightness < 128.
+        """
         import platform as _platform
+
         if _platform.system() == "Windows":
             try:
                 import winreg
@@ -436,9 +559,11 @@ class AppController(QObject):
                 )
                 val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
                 winreg.CloseKey(key)
-                return val == 0   # 0 → dark mode, 1 → light mode
+                return val == 0   # 0 → dark mode enabled
             except Exception:
-                pass
+                pass   # registry key absent or unreadable — fall through
+
+        # Generic fallback via QPalette
         from PyQt6.QtGui import QPalette
         app = QApplication.instance()
         if app is None:

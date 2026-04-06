@@ -1,3 +1,19 @@
+"""
+gui/pages/history_mixin.py — Reading History Page
+==================================================
+
+Provides the History page UI and logic as a mixin for MainWindow.
+
+Features:
+  • Displays the last 20 read texts, grouped into Recent / Previous / Old.
+  • Each item shows a truncated text preview with a timestamp.
+  • Double-clicking an item restores it to the text box on the Dashboard.
+  • "Clear" button wipes the full history list.
+
+History is stored in-memory and persisted by the AudioHistory service
+which keeps the last N session MP3 files alongside an index.json.
+"""
+
 import os
 
 from PyQt6.QtWidgets import (

@@ -18,3 +18,8 @@ env/
 build/
 dist/
 *.spec
+
+# Bundled binaries (keep locally, never commit)
+python312.exe
+*.exe
+*.dll
