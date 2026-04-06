@@ -42,7 +42,21 @@ OVERLAY_DRAG_PX     = 6              # drag detection threshold
 DEFAULT_HIGHLIGHT_COLOR = "#FFD60A"   # yellow
 
 # ── Network ───────────────────────────────────────────────────────────────────
-EDGE_TTS_TIMEOUT_S  = 10             # seconds per sentence synthesis attempt
+EDGE_TTS_TIMEOUT_S       = 10        # seconds per sentence synthesis attempt
+NETWORK_CHECK_TIMEOUT_S  = 2         # seconds per connectivity probe
+
+# ── Safety limits ─────────────────────────────────────────────────────────────
+# Max bytes allowed in the in-memory audio buffer per sentence.
+# A normal sentence produces ~20-80 KB; 2 MB is a hard safety ceiling.
+MAX_SENTENCE_AUDIO_BYTES = 2 * 1024 * 1024   # 2 MB per sentence
+
+# Max sentences processed in a single speak() call (Fix #1 — large text queue).
+# Prevents hundreds of EdgeTTS requests from being queued for very long pastes.
+MAX_SENTENCE_QUEUE = 50
+
+# EdgeTTS retry settings (Fix #2 — retry on timeout).
+EDGE_TTS_MAX_RETRIES    = 3    # total attempts per sentence before giving up
+EDGE_TTS_RETRY_DELAY_S  = 1.0  # initial backoff delay; doubles each retry
 
 # ── Platform keep-front timer (macOS) ─────────────────────────────────────────
 KEEP_FRONT_INTERVAL_MS = 500
