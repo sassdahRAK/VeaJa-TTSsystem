@@ -127,7 +127,7 @@ STEPS = [
 
     # ── History page ───────────────────────────────────────────────────────────
     {
-        "widget_attr": "_history_list",
+        "widget_attr": "_content_stack",
         "title": "Reading History",
         "body": (
             "Your last 20 texts are saved here.\n\n"
@@ -152,7 +152,7 @@ STEPS = [
 
     # ── Ask a Question ─────────────────────────────────────────────────────────
     {
-        "widget_attr": None,
+        "widget_attr": "_content_stack",
         "title": "Ask a Question",
         "body": (
             "Find answers to common questions in the Ask a Question section.\n\n"
@@ -172,22 +172,6 @@ STEPS = [
             "☀ / ☾ button at the top of the sidebar.\n\n"
             "The floating overlay and tray icon both "
             "follow this setting automatically."
-        ),
-        "navigate_to": None,
-    },
-
-    # ── Word highlighting ──────────────────────────────────────────────────────
-    {
-        "widget_attr": None,
-        "title": "Word Highlighting — Two Modes",
-        "body": (
-            "Veaja highlights words in two places simultaneously:\n\n"
-            "1. Dashboard Text tab — yellow progress bar left-to-right. "
-            "Best when you paste text directly into Veaja.\n\n"
-            "2. Overlay pill — karaoke display shows the current word "
-            "in yellow. Use this when reading PDFs or browser pages "
-            "so you never need to switch windows.\n\n"
-            "Customise the highlight colour in your Profile."
         ),
         "navigate_to": None,
     },
@@ -327,14 +311,14 @@ class _Bubble(QWidget):
         except AttributeError:
             is_dark = self.palette().color(self.backgroundRole()).lightness() < 128
         if is_dark:
-            bg      = QColor(26, 26, 28, 64)
+            bg      = QColor(26, 26, 28, 191)
             text_c  = QColor(229, 57, 53)
             sub_c   = QColor(220, 80, 70)
             border  = QColor(58, 58, 63, 80)
             trk_c   = QColor(58, 58, 63)
             fill_c  = QColor(10, 132, 255)
         else:
-            bg      = QColor(255, 255, 255, 64)
+            bg      = QColor(255, 255, 255, 191)
             text_c  = QColor(229, 57, 53)
             sub_c   = QColor(220, 80, 70)
             border  = QColor(210, 210, 215, 80)
@@ -446,7 +430,7 @@ class TourOverlay(QWidget):
         if not widget_attr:
             return None
         target: QWidget | None = getattr(self._main, widget_attr, None)
-        if target is None or not target.isVisible():
+        if target is None or not target.isVisibleTo(self._main):
             return None
         global_pos = target.mapToGlobal(QPoint(0, 0))
         local_pos  = self.mapFromGlobal(global_pos)
@@ -497,23 +481,11 @@ class TourOverlay(QWidget):
         painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
 
         if spot is not None:
-            path = QPainterPath()
-            path.addRoundedRect(QRectF(spot), 10, 10)
-
-            # Clear the dim overlay inside the spotlight
-            painter.setCompositionMode(
-                QPainter.CompositionMode.CompositionMode_Clear)
-            painter.fillPath(path, QBrush(Qt.GlobalColor.transparent))
-
-            # Fill spotlight with a clean themed background
+            # Draw the blue focus border directly on top of the dim overlay.
+            # The content inside remains visible through the uniform dim —
+            # no hole-punching, so nothing goes black.
             painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_SourceOver)
-            spot_bg = QColor(26, 26, 28, 230) if is_dark else QColor(248, 248, 248, 230)
-            painter.setBrush(QBrush(spot_bg))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(QRectF(spot), 10, 10)
-
-            # Blue spotlight border
             painter.setPen(QPen(QColor(10, 132, 255, 220), 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(QRectF(spot), 10, 10)

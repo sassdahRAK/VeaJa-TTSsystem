@@ -14,6 +14,7 @@ from core.selection_monitor import SelectionMonitor
 from core.audio_history import AudioHistory
 from core.profile import ProfileManager
 from core.language import filter_for_tts, language_display_name
+from core.network_monitor import NetworkMonitor
 from gui.main_window import MainWindow, ReadState
 from gui.overlay_widget import OverlayWidget
 from gui.tray_icon import TrayIcon
@@ -39,6 +40,9 @@ class AppController(QObject):
         # WindowManager — controls overlay ↔ main-window visibility rules
         self._wm = WindowManager(self._main_window, self._overlay, parent=self)
         self._current_text: str = ""
+
+        # Network monitor — checks connectivity every 10 s in a background thread
+        self._net_monitor = NetworkMonitor(parent=self, interval_ms=10_000)
 
         self._wire_signals()
         self._populate_voices()
@@ -77,6 +81,7 @@ class AppController(QObject):
         self._main_window.terms_requested.connect(self._show_terms)
         self._main_window.profile_requested.connect(self._show_profile_dialog)
         self._main_window.mode_changed.connect(self._on_mode_changed)
+        self._main_window.settings_save_requested.connect(self._on_settings_save)
         self._main_window.tour_requested.connect(self._show_tour)
 
         # Profile page save (includes live checkbox toggle) → persist + update overlay
@@ -84,6 +89,9 @@ class AppController(QObject):
 
         # Profile changes → update UI
         self._profile.profile_changed.connect(self._on_profile_changed)
+
+        # Network monitor → auto-switch mode and update status label
+        self._net_monitor.connectivity_changed.connect(self._on_connectivity_changed)
 
         # Tray → always show main via WindowManager
         self._tray.show_window_requested.connect(self._wm.show_main)
@@ -310,6 +318,35 @@ class AppController(QObject):
         self._tts.set_forced_offline(not online)
         # Refresh voice list to show the right voices for the new mode
         self._main_window.populate_voices(self._tts.get_voices())
+
+    def _on_settings_save(self, settings: dict):
+        """Persist voice settings into the user profile on disk."""
+        profile = self._profile.get()
+        profile.update(settings)
+        self._profile.save(profile)
+
+    def _on_connectivity_changed(self, is_online: bool):
+        """NetworkMonitor detected an internet state change.
+
+        - Updates the status label in the settings page (blue/red message).
+        - When going offline: forces the TTS engine to offline mode immediately
+          so any in-progress or next speech attempt uses pyttsx3 (no crash).
+        - When coming back online: restores online mode only if edge_tts is
+          available; the user can still manually switch back via the checkbox.
+        """
+        # Update the status label and lock/unlock the online checkbox
+        self._main_window.update_connection_status(is_online)
+
+        if not is_online:
+            # Auto-switch TTS to offline to prevent network-related crashes
+            self._tts.set_forced_offline(True)
+            self._main_window.populate_voices(self._tts.get_voices())
+        else:
+            # Internet is back — restore online mode if the engine supports it
+            if self._tts.is_edge_available():
+                self._tts.set_forced_offline(False)
+                self._main_window.set_online_mode(True)
+                self._main_window.populate_voices(self._tts.get_voices())
 
     def _on_theme_changed(self, dark: bool):
         self._tray.update_icon(dark)

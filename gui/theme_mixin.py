@@ -19,6 +19,7 @@ class ThemeMixin:
     def _toggle_theme(self):
         self._dark = not self._dark
         self._reload_header_logo()
+        self._reload_titlebar_icon()
         self._update_dashboard_pill_icon()
         self._apply_theme()
         self.theme_changed.emit(self._dark)
@@ -40,6 +41,10 @@ class ThemeMixin:
                 self.setStyleSheet(f.read())
         # Sidebar (inverted)
         self._apply_sidebar_theme()
+        # Custom title bar
+        self._apply_titlebar_theme()
+        # Settings page reset icon (theme-sensitive SVG)
+        self._update_settings_reset_icon()
 
     def _apply_sidebar_theme(self):
         if self._sidebar_widget is None:
@@ -89,6 +94,69 @@ class ThemeMixin:
                 f"#profileFrame {{ background: {bg}; border-radius: 10px; border: none; }}"
             )
         # Profile name colour is handled by QLabel#profileName rule in sidebar QSS
+
+    def _apply_titlebar_theme(self):
+        if not hasattr(self, "_title_bar_widget") or self._title_bar_widget is None:
+            return
+
+        if self._dark:
+            bg      = "#1a1a1c"
+            border  = "rgba(255,255,255,0.06)"
+            text_c  = "#c7c7cc"
+            btn_h   = "rgba(255,255,255,0.09)"
+            close_h = "#c42b1c"
+            close_t = "#ffffff"
+        else:
+            bg      = "#ececec"
+            border  = "rgba(0,0,0,0.10)"
+            text_c  = "#3a3a3c"
+            btn_h   = "rgba(0,0,0,0.08)"
+            close_h = "#c42b1c"
+            close_t = "#ffffff"
+
+        self._title_bar_widget.setStyleSheet(f"""
+QWidget#titleBar {{
+    background: {bg};
+    border-bottom: 1px solid {border};
+}}
+QLabel#titleBarIcon {{
+    background: transparent;
+}}
+QLabel#titleBarText {{
+    font-size: 12px;
+    font-weight: 500;
+    color: {text_c};
+    background: transparent;
+    letter-spacing: 0.2px;
+}}
+QPushButton#titleBarMin, QPushButton#titleBarMax {{
+    background: transparent;
+    color: {text_c};
+    border: none;
+    font-size: 11px;
+}}
+QPushButton#titleBarMin:hover, QPushButton#titleBarMax:hover {{
+    background: {btn_h};
+}}
+QPushButton#titleBarMin:pressed, QPushButton#titleBarMax:pressed {{
+    background: {btn_h};
+    opacity: 0.7;
+}}
+QPushButton#titleBarClose {{
+    background: transparent;
+    color: {text_c};
+    border: none;
+    font-size: 11px;
+}}
+QPushButton#titleBarClose:hover {{
+    background: {close_h};
+    color: {close_t};
+}}
+QPushButton#titleBarClose:pressed {{
+    background: {close_h};
+    opacity: 0.85;
+}}
+""")
 
     def _default_logo_path(self) -> str | None:
         """Return the best available default logo path — PNG preferred over SVG."""

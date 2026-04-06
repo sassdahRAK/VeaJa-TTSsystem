@@ -19,6 +19,11 @@ DEFAULT_PROFILE: dict = {
     "terms_accepted":  False,
     "highlight_color": "#FFD60A",    # word-highlight colour (yellow)
     "dark_mode":       None,         # None = follow system; True/False = user override
+    # Voice settings (persisted by Voice Settings → Save)
+    "speed":           175,          # TTS rate, range 50–400
+    "overlay_shape":   "rectangle",  # "circle" | "rectangle"
+    "voice_index":     0,            # index into the current voice list
+    "volume":          1.0,          # 0.0–1.0
 }
 
 

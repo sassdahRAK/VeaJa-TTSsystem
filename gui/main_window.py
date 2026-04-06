@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QStackedLayout,
     QLabel, QPushButton, QTextEdit, QSlider, QComboBox, QLineEdit,
     QFrame, QScrollArea, QCheckBox, QSizePolicy, QListWidget, QListWidgetItem,
-    QGraphicsDropShadowEffect
+    QGraphicsDropShadowEffect, QSizeGrip
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer, QPoint
 from PyQt6.QtGui import (
@@ -23,7 +23,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtCore import QRectF
 
-from gui._window_shared import ASSETS, STYLES, _make_square_pixmap  # noqa: E402
+from gui._window_shared import ASSETS, STYLES, _make_square_pixmap, _make_circle_pixmap  # noqa: E402
 
 
 # ── Read state ─────────────────────────────────────────────────────────────────
@@ -55,6 +55,40 @@ def _is_dark_mode() -> bool:
     return app.palette().color(QPalette.ColorRole.Window).lightness() < 128
 
 
+# ── Drag-to-move title bar ────────────────────────────────────────────────────
+
+class _DragBar(QWidget):
+    """Title bar widget that handles window drag and double-click to maximize."""
+
+    def __init__(self, main_window: "MainWindow", parent=None):
+        super().__init__(parent)
+        self._win = main_window
+        self._drag_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self._win.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
+            if self._win.isMaximized():
+                # Snap out of maximized before dragging
+                self._win.showNormal()
+                if self._win._max_btn:
+                    self._win._max_btn.setText("❐")
+                # Recalculate so the window doesn't jump
+                self._drag_pos = QPoint(self._win.width() // 2, self.height() // 2)
+            self._win.move(event.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = None
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._win._toggle_maximize()
+
+
 # ── Mixin imports ──
 from gui.pages.dashboard_mixin import DashboardMixin    # noqa: E402
 from gui.pages.settings_mixin import SettingsMixin      # noqa: E402
@@ -77,8 +111,9 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     theme_changed         = pyqtSignal(bool)   # True = dark
     terms_requested       = pyqtSignal()
     profile_requested     = pyqtSignal()
-    profile_save_requested = pyqtSignal(dict)  # emitted when user saves profile page
-    mode_changed          = pyqtSignal(bool)   # True = online
+    profile_save_requested  = pyqtSignal(dict)  # emitted when user saves profile page
+    settings_save_requested = pyqtSignal(dict)  # emitted when user saves voice settings
+    mode_changed           = pyqtSignal(bool)   # True = online
     shape_changed         = pyqtSignal(str)    # "circle" | "rectangle"
     tour_requested        = pyqtSignal()
 
@@ -110,6 +145,11 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         self.setWindowTitle("Veaja")
         self.setMinimumSize(780, 580)
         self.resize(900, 660)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self._title_bar_height = 38
+        self._title_bar_widget: QWidget | None = None
+        self._title_bar_label: QLabel | None = None
+        self._max_btn: QPushButton | None = None
         self._center()
         self._build_ui()
         self._apply_theme()
@@ -121,14 +161,25 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        root = QHBoxLayout(central)
+        root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._sidebar_widget = self._build_sidebar()
-        root.addWidget(self._sidebar_widget)
+        # Custom title bar
+        self._title_bar_widget = self._build_title_bar()
+        root.addWidget(self._title_bar_widget)
 
-        # Content stack (pages 0-5)
+        # Content row: sidebar + pages
+        content_row = QWidget()
+        content_row.setObjectName("contentRow")
+        row_lay = QHBoxLayout(content_row)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(0)
+
+        self._sidebar_widget = self._build_sidebar()
+        row_lay.addWidget(self._sidebar_widget)
+
+        # Content stack (pages 0-6)
         self._content_stack = QStackedWidget()
         self._content_stack.setObjectName("contentStack")
         self._content_stack.addWidget(self._build_dashboard_page())  # 0
@@ -138,7 +189,106 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         self._content_stack.addWidget(self._build_privacy_page())    # 4
         self._content_stack.addWidget(self._build_tutorial_page())   # 5
         self._content_stack.addWidget(self._build_profile_page())    # 6
-        root.addWidget(self._content_stack, 1)
+        row_lay.addWidget(self._content_stack, 1)
+
+        root.addWidget(content_row, 1)
+
+        # Bottom-right size grip for mouse resize
+        grip = QSizeGrip(self)
+        grip.setFixedSize(14, 14)
+        grip.move(self.width() - 14, self.height() - 14)
+
+    def _build_title_bar(self) -> QWidget:
+        bar = _DragBar(self)
+        bar.setObjectName("titleBar")
+        bar.setFixedHeight(self._title_bar_height)
+
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(14, 0, 0, 0)
+        lay.setSpacing(0)
+
+        # App icon (small, displayed as circle)
+        self._titlebar_icon = QLabel()
+        self._titlebar_icon.setObjectName("titleBarIcon")
+        self._titlebar_icon.setFixedSize(26, 26)
+        self._titlebar_icon.setScaledContents(False)
+        self._titlebar_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._reload_titlebar_icon()
+        lay.addWidget(self._titlebar_icon)
+        lay.addSpacing(8)
+
+        # App name
+        self._title_bar_label = QLabel("Veaja")
+        self._title_bar_label.setObjectName("titleBarText")
+        lay.addWidget(self._title_bar_label)
+
+        lay.addStretch()
+
+        # Window control buttons (standard width 46px each)
+        self._min_btn = QPushButton("─")
+        self._min_btn.setObjectName("titleBarMin")
+        self._min_btn.setFixedSize(46, self._title_bar_height)
+        self._min_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self._min_btn.clicked.connect(self.showMinimized)
+
+        self._max_btn = QPushButton("❐")
+        self._max_btn.setObjectName("titleBarMax")
+        self._max_btn.setFixedSize(46, self._title_bar_height)
+        self._max_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self._max_btn.clicked.connect(self._toggle_maximize)
+
+        self._close_btn_tb = QPushButton("✕")
+        self._close_btn_tb.setObjectName("titleBarClose")
+        self._close_btn_tb.setFixedSize(46, self._title_bar_height)
+        self._close_btn_tb.setCursor(Qt.CursorShape.ArrowCursor)
+        self._close_btn_tb.clicked.connect(self.close)
+
+        lay.addWidget(self._min_btn)
+        lay.addWidget(self._max_btn)
+        lay.addWidget(self._close_btn_tb)
+
+        return bar
+
+    def _reload_titlebar_icon(self):
+        if not hasattr(self, "_titlebar_icon"):
+            return
+        from PyQt6.QtWidgets import QApplication as _QApp
+        _app = _QApp.instance()
+        dpr  = _app.primaryScreen().devicePixelRatio() if (_app and _app.primaryScreen()) else 1.0
+        logical = 20   # icon size; container is 26 — gives 3 px padding each side
+        phys    = int(logical * dpr)          # e.g. 25 at 125 % DPI
+
+        stem = "logo_light" if self._dark else "logo_dark"
+        for ext in (".png", ".svg"):
+            p = os.path.join(ASSETS, stem + ext)
+            if os.path.exists(p):
+                raw = QPixmap(p)
+                if raw.isNull():
+                    continue
+                # Scale to physical size for crisp rendering on HiDPI screens
+                sq = raw.scaled(
+                    phys, phys,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                if sq.width() != phys or sq.height() != phys:
+                    x = (sq.width()  - phys) // 2
+                    y = (sq.height() - phys) // 2
+                    sq = sq.copy(x, y, phys, phys)
+                sq.setDevicePixelRatio(dpr)   # logical = phys/dpr = 20 px
+                circle = _make_circle_pixmap(sq)
+                # circle inherits dpr from sq → logical size stays 20 px
+                self._titlebar_icon.setPixmap(circle)
+                return
+
+    def _toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+            self._max_btn.setText("❐")
+        else:
+            self.showMaximized()
+            self._max_btn.setText("❒")
+
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -353,7 +503,9 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
             name = "Veaja"
         self._title_label.setText(name)
         self.setWindowTitle(name)
-        self._reload_header_logo(profile.get("logo_path"))
+        if self._title_bar_label is not None:
+            self._title_bar_label.setText(name)
+        self._reload_header_logo(profile.get("logo_path"))  # redraws avatar with new name if needed
         color = profile.get("highlight_color", "#FFD60A")
         if color:
             self._highlight_color = color
@@ -362,6 +514,52 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         if saved_dark is not None and isinstance(saved_dark, bool):
             if saved_dark != self._dark:
                 self._toggle_theme()
+        # Restore voice settings
+        self._apply_voice_settings(profile)
+
+    def _apply_voice_settings(self, profile: dict):
+        """Restore Voice Settings controls and TTS engine state from a profile dict."""
+
+        # Speed
+        speed = profile.get("speed", 175)
+        self._speed_slider.blockSignals(True)
+        self._speed_slider.setValue(int(speed))
+        self._speed_slider.blockSignals(False)
+        if self._tts:
+            self._tts.set_rate(int(speed))
+
+        # Overlay shape
+        shape = profile.get("overlay_shape", "rectangle")
+        is_circle = (shape == "circle")
+        self._shape_circle.blockSignals(True)
+        self._shape_rect.blockSignals(True)
+        self._shape_circle.setChecked(is_circle)
+        self._shape_rect.setChecked(not is_circle)
+        self._shape_circle.blockSignals(False)
+        self._shape_rect.blockSignals(False)
+        self.shape_changed.emit(shape)
+        self._update_dashboard_pill_icon()
+
+        # Volume
+        vol_f = float(profile.get("volume", 1.0))
+        self._vol_slider.blockSignals(True)
+        self._vol_slider.setValue(int(vol_f * 100))
+        self._vol_slider.blockSignals(False)
+        if self._tts:
+            self._tts.set_volume(vol_f)
+
+        # Voice index (applied after voice list is populated)
+        idx = int(profile.get("voice_index", 0))
+        if self._sound_input.count() > 0:
+            idx = min(idx, self._sound_input.count() - 1)
+            self._sound_input.blockSignals(True)
+            self._voice_combo.blockSignals(True)
+            self._sound_input.setCurrentIndex(idx)
+            self._voice_combo.setCurrentIndex(idx)
+            self._sound_input.blockSignals(False)
+            self._voice_combo.blockSignals(False)
+            if self._tts:
+                self._tts.set_voice(self._sound_input.itemData(idx))
 
     def mark_reading_started(self, text: str):
         self._last_read_text = text
@@ -453,6 +651,24 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     # ════════════════════════════════════════════════════════════════════════ #
     #  WINDOW
     # ════════════════════════════════════════════════════════════════════════ #
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._enable_dwm_shadow()
+
+    def _enable_dwm_shadow(self):
+        """Restore Windows drop-shadow on a frameless window via DWM."""
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            # DWMWA_NCRENDERING_POLICY = 2, DWMNCRP_ENABLED = 2
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 2, ctypes.byref(ctypes.c_int(2)), ctypes.sizeof(ctypes.c_int)
+            )
+            margins = (ctypes.c_int * 4)(1, 1, 1, 1)
+            ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, margins)
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         event.ignore()

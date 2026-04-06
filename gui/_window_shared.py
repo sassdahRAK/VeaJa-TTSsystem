@@ -6,10 +6,28 @@ Kept in a separate module to avoid circular imports.
 import os
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QPainter, QPainterPath
 
 ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
 STYLES = os.path.join(os.path.dirname(__file__), "..", "styles")
+
+
+def _make_circle_pixmap(src: QPixmap) -> QPixmap:
+    """Mask a square QPixmap into a circle (anti-aliased, HiDPI-correct)."""
+    dpr = src.devicePixelRatio()
+    size = src.width()                          # physical pixels
+    logical = size / dpr if dpr else size       # logical pixels (painter coord space)
+    result = QPixmap(size, size)
+    result.fill(Qt.GlobalColor.transparent)
+    result.setDevicePixelRatio(dpr)
+    painter = QPainter(result)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.addEllipse(0, 0, logical, logical)     # logical coords to match painter space
+    painter.setClipPath(path)
+    painter.drawPixmap(0, 0, src)
+    painter.end()
+    return result
 
 
 def _make_square_pixmap(path: str, size: int) -> QPixmap | None:

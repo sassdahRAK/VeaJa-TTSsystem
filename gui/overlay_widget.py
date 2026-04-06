@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QPoint, QRectF, QVariantAnimation,
-    QEasingCurve, pyqtSignal, QTimer, QSize
+    QEasingCurve, pyqtSignal, QTimer, QSize, QEvent
 )
 from PyQt6.QtGui import (
     QPainter, QPainterPath, QColor, QPen, QBrush,
@@ -271,6 +271,8 @@ class OverlayWidget(QWidget):
         self._press_pos: QPoint | None = None
         self._dragging: bool = False
         self._expanded: bool = False
+        self._label_drag_mode: bool = False       # free-drag after double-click on label
+        self._label_drag_offset: QPoint = QPoint()
         self._dot_count: int = 0
         # Dark mode stored explicitly — don't rely on per-paint detection
         # because Qt may misread Windows 11 dark mode from QPalette.
@@ -367,6 +369,7 @@ class OverlayWidget(QWidget):
         font_title.setPointSize(10)
         font_title.setWeight(QFont.Weight.Medium)
         self._title_label.setFont(font_title)
+        self._title_label.installEventFilter(self)
 
         self._reset_btn = QPushButton()
         self._reset_btn.setObjectName("overlayResetBtn")
@@ -388,6 +391,7 @@ class OverlayWidget(QWidget):
         font_body = QFont()
         font_body.setPointSize(9)
         self._body_label.setFont(font_body)
+        self._body_label.installEventFilter(self)
 
         tp_layout.addLayout(title_row)
         tp_layout.addWidget(self._body_label)
@@ -696,6 +700,33 @@ class OverlayWidget(QWidget):
         painter.drawRoundedRect(rect, radius, radius)
 
     # ------------------------------------------------------------------ #
+    # Label double-click → free-drag mode
+    # ------------------------------------------------------------------ #
+
+    def eventFilter(self, obj, event):
+        """Detect double-click on either text label to start free-drag mode."""
+        if obj in (self._title_label, self._body_label):
+            if event.type() == QEvent.Type.MouseButtonDblClick:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._enter_label_drag_mode(event.globalPosition().toPoint())
+                    return True   # consume — don't propagate
+        return super().eventFilter(obj, event)
+
+    def _enter_label_drag_mode(self, global_cursor: QPoint):
+        """Enter free-drag mode: the overlay follows the cursor without
+        requiring the mouse button to be held down."""
+        self._label_drag_mode = True
+        self._label_drag_offset = global_cursor - self.pos()
+        # grabMouse redirects ALL mouse events (including move without button)
+        # to this widget, so mouseMoveEvent fires even over child widgets.
+        self.grabMouse(QCursor(Qt.CursorShape.SizeAllCursor))
+
+    def _exit_label_drag_mode(self):
+        self._label_drag_mode = False
+        self.releaseMouse()
+        self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+
+    # ------------------------------------------------------------------ #
     # Mouse events — drag + click
     # ------------------------------------------------------------------ #
 
@@ -707,6 +738,17 @@ class OverlayWidget(QWidget):
             self._show_context_menu(event.globalPosition().toPoint())
 
     def mouseMoveEvent(self, event):
+        # Free-drag mode: no button required — overlay follows the cursor
+        if self._label_drag_mode:
+            new_pos = event.globalPosition().toPoint() - self._label_drag_offset
+            screen = QApplication.primaryScreen().availableGeometry()
+            new_pos.setX(max(screen.left(),
+                             min(new_pos.x(), screen.right()  - self.width())))
+            new_pos.setY(max(screen.top(),
+                             min(new_pos.y(), screen.bottom() - self.height())))
+            self.move(new_pos)
+            return
+
         if self._press_pos is None:
             return
         if event.buttons() & Qt.MouseButton.LeftButton:
@@ -720,6 +762,11 @@ class OverlayWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            # A click while in free-drag mode exits it (no read/stop action)
+            if self._label_drag_mode:
+                self._exit_label_drag_mode()
+                return
+
             if not self._dragging:
                 if self._speaking or self._processing:
                     self.stop_requested.emit()   # pause (AppController decides)
@@ -729,6 +776,12 @@ class OverlayWidget(QWidget):
                     self.read_requested.emit(self._text)
             self._press_pos = None
             self._dragging = False
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and self._label_drag_mode:
+            self._exit_label_drag_mode()
+        else:
+            super().keyPressEvent(event)
 
     # ------------------------------------------------------------------ #
     # Hover — expand / collapse text panel

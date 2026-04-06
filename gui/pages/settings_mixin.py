@@ -9,6 +9,7 @@ from PyQt6.QtGui import QFont, QPixmap, QPainter
 from PyQt6.QtSvg import QSvgRenderer
 
 from gui._window_shared import ASSETS  # noqa: F401
+from gui.icon_utils import svg_icon
 
 
 class SettingsMixin:
@@ -23,16 +24,26 @@ class SettingsMixin:
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        # Top action: Save
+        # Top action: Reset + Save
         top = QWidget()
         top.setObjectName("pageTopAction")
         t_lay = QHBoxLayout(top)
         t_lay.setContentsMargins(32, 14, 32, 10)
         t_lay.addStretch()
+
+        # Reset button — icon only, themed via _update_settings_reset_icon()
+        self._reset_btn = QPushButton()
+        self._reset_btn.setObjectName("btnOutline")
+        self._reset_btn.setFixedSize(36, 32)
+        self._reset_btn.setToolTip("Reset to defaults")
+        self._reset_btn.clicked.connect(self._reset_settings)
+        t_lay.addWidget(self._reset_btn)
+        t_lay.addSpacing(8)
+
         save_btn = QPushButton("Save")
         save_btn.setObjectName("btnOutline")
         save_btn.setFixedSize(90, 32)
-        save_btn.clicked.connect(lambda: None)
+        save_btn.clicked.connect(self._save_settings)
         t_lay.addWidget(save_btn)
         lay.addWidget(top)
 
@@ -114,18 +125,24 @@ class SettingsMixin:
         self._online_btn = QCheckBox("Online Mode")
         self._online_btn.setObjectName("settingsCheck")
         self._online_btn.setChecked(True)
-        self._online_btn.toggled.connect(self._on_mode_checkbox)
+        self._online_btn.toggled.connect(self._on_online_checkbox)
         chk_row.addWidget(self._online_btn)
         self._offline_btn = QCheckBox("Offline Mode")
         self._offline_btn.setObjectName("settingsCheck")
-        self._offline_btn.toggled.connect(
-            lambda c: (self._online_btn.blockSignals(True),
-                       self._online_btn.setChecked(not c),
-                       self._online_btn.blockSignals(False)) if c else None
-        )
+        self._offline_btn.toggled.connect(self._on_offline_checkbox)
         chk_row.addWidget(self._offline_btn)
         chk_row.addStretch()
         mode_block.addLayout(chk_row)
+
+        # Connection status label — updated live by NetworkMonitor
+        self._conn_status_lbl = QLabel()
+        self._conn_status_lbl.setObjectName("connStatusLbl")
+        self._conn_status_lbl.setWordWrap(False)
+        font = QFont()
+        font.setPointSize(9)
+        self._conn_status_lbl.setFont(font)
+        mode_block.addWidget(self._conn_status_lbl)
+
         ml_row.addLayout(mode_block, 1)
 
         # Language — right-aligned, same row
@@ -284,8 +301,121 @@ class SettingsMixin:
         lbl.setObjectName("inlineEdit")
         return lbl
 
-    def _on_mode_checkbox(self, checked: bool):
+    def _on_online_checkbox(self, checked: bool):
+        """Online checkbox toggled — sync the offline checkbox and notify."""
         self._offline_btn.blockSignals(True)
         self._offline_btn.setChecked(not checked)
         self._offline_btn.blockSignals(False)
-        self.mode_changed.emit(checked)
+        self.mode_changed.emit(checked)   # True = online
+
+    def _on_offline_checkbox(self, checked: bool):
+        """Offline checkbox toggled — sync the online checkbox and notify."""
+        self._online_btn.blockSignals(True)
+        self._online_btn.setChecked(not checked)
+        self._online_btn.blockSignals(False)
+        self.mode_changed.emit(not checked)  # True = online, so offline → emit False
+
+    def update_connection_status(self, is_online: bool):
+        """Called by AppController whenever internet connectivity changes.
+
+        - Updates the status label with a coloured message.
+        - Locks/unlocks the Online Mode checkbox: when offline the user cannot
+          select online mode (prevents crashes from trying to reach the network).
+        """
+        # Track so _reset_settings can decide the correct default mode
+        self._net_is_online = is_online
+
+        if not hasattr(self, "_conn_status_lbl"):
+            return
+
+        if is_online:
+            self._conn_status_lbl.setText("Your current state is online")
+            self._conn_status_lbl.setStyleSheet("color: #1a7fe8; font-style: normal;")
+            # Re-enable online mode checkbox so the user can switch back
+            self._online_btn.setEnabled(True)
+            self._online_btn.setToolTip("")
+        else:
+            self._conn_status_lbl.setText(
+                "You are offline — please check internet connection"
+            )
+            self._conn_status_lbl.setStyleSheet("color: #d9363e; font-style: normal;")
+            # Force switch to offline mode and lock the online checkbox
+            self._online_btn.blockSignals(True)
+            self._online_btn.setChecked(False)
+            self._online_btn.blockSignals(False)
+            self._offline_btn.blockSignals(True)
+            self._offline_btn.setChecked(True)
+            self._offline_btn.blockSignals(False)
+            self._online_btn.setEnabled(False)
+            self._online_btn.setToolTip(
+                "Online Mode is unavailable — no internet connection detected"
+            )
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+
+    def _save_settings(self):
+        """Collect the current control state, persist via signal, go to dashboard."""
+        settings = {
+            "speed":         self._speed_slider.value(),
+            "overlay_shape": "circle" if self._shape_circle.isChecked() else "rectangle",
+            "voice_index":   self._sound_input.currentIndex(),
+            "volume":        self._vol_slider.value() / 100.0,
+        }
+        self.settings_save_requested.emit(settings)
+        self._navigate(0)   # return to dashboard
+
+    # ── Reset ─────────────────────────────────────────────────────────────────
+
+    def _reset_settings(self):
+        """Restore every Voice Setting control to its default value."""
+
+        # 1. Overlay shape → Rectangle (default)
+        self._shape_rect.blockSignals(True)
+        self._shape_circle.blockSignals(True)
+        self._shape_rect.setChecked(True)
+        self._shape_circle.setChecked(False)
+        self._shape_rect.blockSignals(False)
+        self._shape_circle.blockSignals(False)
+        # Notify overlay and dashboard pill
+        self.shape_changed.emit("rectangle")
+        self._update_dashboard_pill_icon()
+
+        # 2. Speed → 175
+        self._speed_slider.setValue(175)   # triggers _on_speed_changed → tts.set_rate
+
+        # 3. Mode → online if internet available, else offline
+        is_online = getattr(self, "_net_is_online", True) and \
+                    self._tts is not None and self._tts.is_edge_available()
+        self._online_btn.blockSignals(True)
+        self._offline_btn.blockSignals(True)
+        self._online_btn.setChecked(is_online)
+        self._offline_btn.setChecked(not is_online)
+        self._online_btn.blockSignals(False)
+        self._offline_btn.blockSignals(False)
+        self.mode_changed.emit(is_online)
+
+        # 4. Language → English (index 0)
+        self._lang_combo.setCurrentIndex(0)
+
+        # 5. Voice / Sound → first available voice
+        self._sound_input.blockSignals(True)
+        self._voice_combo.blockSignals(True)
+        self._sound_input.setCurrentIndex(0)
+        self._voice_combo.setCurrentIndex(0)
+        self._sound_input.blockSignals(False)
+        self._voice_combo.blockSignals(False)
+        if self._tts and self._sound_input.count() > 0:
+            self._tts.set_voice(self._sound_input.itemData(0))
+
+        # 6. Volume → 100 %
+        self._vol_slider.setValue(100)     # triggers _on_volume_changed → tts.set_volume
+
+    def _update_settings_reset_icon(self):
+        """Refresh the reset button icon to match the current theme."""
+        if not hasattr(self, "_reset_btn"):
+            return
+        icon_color = "#c7c7cc" if self._dark else "#3a3a3c"
+        icon_path = os.path.join(ASSETS, "restart_icon.svg")
+        self._reset_btn.setIcon(svg_icon(icon_path, icon_color, 16))
+        from PyQt6.QtCore import QSize
+        self._reset_btn.setIconSize(QSize(16, 16))
