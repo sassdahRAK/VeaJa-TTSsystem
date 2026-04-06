@@ -12,8 +12,8 @@ so the user sees the feature being demonstrated in context (live-teach).
 import html as _html
 import re   as _re
 
-from PyQt6.QtWidgets import QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout
-from PyQt6.QtCore    import Qt, QRect, QRectF, QPoint, QEvent
+from PyQt6.QtWidgets import QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout, QApplication
+from PyQt6.QtCore    import Qt, QRect, QRectF, QPoint, QSize, QEvent, QTimer, pyqtSignal
 from PyQt6.QtGui     import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 
 
@@ -49,6 +49,7 @@ STEPS = [
         ),
         "navigate_to": 0,
         "tab": 0,
+        "get_started": True,   # shows the interactive drag trainer
     },
 
     # ── Overlay tab ────────────────────────────────────────────────────────────
@@ -193,6 +194,347 @@ STEPS = [
 ]
 
 
+# ── Drag trainer ───────────────────────────────────────────────────────────────
+
+class _DragTrainer(QWidget):
+    """
+    Full-screen interactive drag exercise.
+
+    When a real OverlayWidget is supplied the trainer shows it on screen and
+    polls its position every 50 ms to detect hold → drag → release.
+
+    Phases:
+      countdown  — 3 … 2 … 1 big number, 1 s per tick
+      hold       — real overlay visible, "Hold on the overlay icon"
+      drag       — user is dragging, "Move it anywhere!"
+      done       — green "Done ✓" for 1.5 s then emits finished
+    """
+
+    finished = pyqtSignal()
+
+    # Fallback fake-pill dimensions (used only when no real overlay is given)
+    _PILL_W = 140
+    _PILL_H = 50
+
+    def __init__(self, is_dark: bool,
+                 overlay_widget: QWidget | None = None,
+                 parent: QWidget | None = None):
+        super().__init__(parent)
+        self._is_dark        = is_dark
+        self._overlay_widget = overlay_widget
+
+        self._phase = "countdown"
+        self._count = 3
+
+        # Real-overlay tracking
+        self._poll_start_pos    = QPoint(0, 0)
+        self._overlay_was_visible = False
+
+        # Fake-pill tracking (fallback when overlay_widget is None)
+        self._pill_pos    = QPoint(0, 0)
+        self._drag_active = False
+        self._drag_offset = QPoint(0, 0)
+
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self.setMouseTracking(True)
+
+        self._cd_timer = QTimer(self)
+        self._cd_timer.timeout.connect(self._tick)
+
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._poll_overlay)
+
+    # ── Public start ──────────────────────────────────────────────────────────
+
+    def start(self):
+        """Reset state and begin the countdown."""
+        self._phase = "countdown"
+        self._count = 3
+        self._poll_timer.stop()
+        if self._overlay_widget is None:
+            self._reset_pill_pos()
+        self._cd_timer.start(1000)
+        self.show()
+        self.raise_()
+        self.update()
+
+    # ── Countdown ─────────────────────────────────────────────────────────────
+
+    def _tick(self):
+        self._count -= 1
+        if self._count <= 0:
+            self._cd_timer.stop()
+            self._phase = "hold"
+            if self._overlay_widget is not None:
+                self._show_real_overlay()
+            else:
+                self._reset_pill_pos()
+        self.update()
+
+    # ── Real overlay management ───────────────────────────────────────────────
+
+    def _show_real_overlay(self):
+        ow = self._overlay_widget
+        self._overlay_was_visible = ow.isVisible()
+
+        # Position the pill somewhere visible if it wasn't already shown
+        if not self._overlay_was_visible:
+            screen = QApplication.primaryScreen()
+            if screen:
+                sg = screen.availableGeometry()
+                # Top-centre of screen — above the dimmed main window instructions
+                cx = sg.center().x()
+                cy = sg.top() + 130
+                try:
+                    ow.show_near(cx, cy)
+                except Exception:
+                    try:
+                        ow.show_overlay()
+                    except Exception:
+                        pass
+            else:
+                try:
+                    ow.show_overlay()
+                except Exception:
+                    pass
+
+        # Record starting position for movement detection
+        self._poll_start_pos = ow.pos()
+        # Poll every 50 ms to detect drag & release
+        self._poll_timer.start(50)
+
+    def _poll_overlay(self):
+        """Check if the real overlay widget has been dragged and released."""
+        ow = self._overlay_widget
+        if not ow:
+            return
+
+        cur   = ow.pos()
+        delta = cur - self._poll_start_pos
+        moved = abs(delta.x()) > 15 or abs(delta.y()) > 15
+
+        mouse_down = bool(QApplication.mouseButtons() & Qt.MouseButton.LeftButton)
+
+        if moved and mouse_down and self._phase == "hold":
+            # User has started dragging
+            self._phase = "drag"
+            self.update()
+        elif moved and not mouse_down and self._phase in ("hold", "drag"):
+            # User dragged and released
+            self._poll_timer.stop()
+            self._phase = "done"
+            self.update()
+            QTimer.singleShot(1500, self._finish)
+
+    # ── Fake pill helpers (fallback only) ─────────────────────────────────────
+
+    def _reset_pill_pos(self):
+        self._pill_pos = QPoint(
+            self.width()  // 2 - self._PILL_W // 2,
+            self.height() // 2 - self._PILL_H // 2,
+        )
+
+    def _pill_rect(self) -> QRect:
+        return QRect(self._pill_pos, QSize(self._PILL_W, self._PILL_H))
+
+    # ── Mouse events (fake-pill fallback only) ────────────────────────────────
+
+    def mousePressEvent(self, event):
+        if self._overlay_widget is not None:
+            event.accept()
+            return
+        if self._phase == "hold":
+            if self._pill_rect().contains(event.position().toPoint()):
+                self._drag_active = True
+                self._drag_offset = event.position().toPoint() - self._pill_pos
+                self._phase = "drag"
+                self.update()
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._overlay_widget is not None:
+            event.accept()
+            return
+        if self._phase == "drag" and self._drag_active:
+            new_pos = event.position().toPoint() - self._drag_offset
+            new_pos.setX(max(0, min(new_pos.x(), self.width()  - self._PILL_W)))
+            new_pos.setY(max(0, min(new_pos.y(), self.height() - self._PILL_H)))
+            self._pill_pos = new_pos
+            self.update()
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self._overlay_widget is not None:
+            event.accept()
+            return
+        if self._phase == "drag":
+            self._drag_active = False
+            self._phase = "done"
+            self.update()
+            QTimer.singleShot(1500, self._finish)
+        event.accept()
+
+    # ── Finish ────────────────────────────────────────────────────────────────
+
+    def _finish(self):
+        self._cd_timer.stop()
+        self._poll_timer.stop()
+        # Hide the real overlay only if we showed it — leave it if it was
+        # already visible before the trainer started.
+        if self._overlay_widget is not None and not self._overlay_was_visible:
+            try:
+                self._overlay_widget.hide_overlay()
+            except Exception:
+                pass
+        self.hide()
+        self.finished.emit()
+
+    # ── Paint ─────────────────────────────────────────────────────────────────
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Dim over the whole trainer area
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 210))
+
+        if self._phase == "countdown":
+            self._paint_countdown(painter)
+        elif self._phase in ("hold", "drag"):
+            if self._overlay_widget is not None:
+                self._paint_real_instruction(painter)
+            else:
+                self._paint_fake_drag(painter)
+        elif self._phase == "done":
+            self._paint_done(painter)
+
+        painter.end()
+
+    # ── Countdown paint ───────────────────────────────────────────────────────
+
+    def _paint_countdown(self, painter: QPainter):
+        font = QFont()
+        font.setPointSize(96)
+        font.setWeight(QFont.Weight.Black)
+        painter.setFont(font)
+        painter.setPen(QColor(10, 132, 255))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, str(self._count))
+
+        sf = QFont()
+        sf.setPointSize(15)
+        painter.setFont(sf)
+        painter.setPen(QColor(200, 200, 200, 180))
+        sub = QRect(0, self.height() // 2 + 70, self.width(), 36)
+        painter.drawText(sub, Qt.AlignmentFlag.AlignCenter, "Get ready…")
+
+    # ── Real overlay instruction paint ────────────────────────────────────────
+
+    def _paint_real_instruction(self, painter: QPainter):
+        if self._phase == "hold":
+            headline = "Hold on the overlay icon"
+            hint     = "The floating Veaja pill is now visible — click and hold it, then drag it"
+        else:
+            headline = "Move it anywhere on screen!"
+            hint     = "Release the mouse when you are done"
+
+        hf = QFont()
+        hf.setPointSize(22)
+        hf.setWeight(QFont.Weight.Bold)
+        painter.setFont(hf)
+        painter.setPen(QColor(255, 255, 255, 235))
+        h_rect = QRect(0, self.height() // 3, self.width(), 50)
+        painter.drawText(h_rect, Qt.AlignmentFlag.AlignCenter, headline)
+
+        sf = QFont()
+        sf.setPointSize(12)
+        painter.setFont(sf)
+        painter.setPen(QColor(180, 180, 180, 200))
+        s_rect = QRect(40, self.height() // 3 + 58, self.width() - 80, 40)
+        painter.drawText(
+            s_rect,
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop,
+            hint,
+        )
+
+        # Small arrow pointing upward toward where the pill is placed
+        if self._phase == "hold":
+            cx = self.width() // 2
+            tip_y = self.height() // 3 - 20
+            painter.setPen(QPen(QColor(10, 132, 255, 160), 2))
+            painter.drawLine(cx, tip_y, cx, tip_y - 40)
+            # Arrowhead
+            painter.drawLine(cx, tip_y - 40, cx - 10, tip_y - 25)
+            painter.drawLine(cx, tip_y - 40, cx + 10, tip_y - 25)
+
+    # ── Fake pill drag paint (fallback) ───────────────────────────────────────
+
+    def _paint_fake_drag(self, painter: QPainter):
+        if self._phase == "hold":
+            headline = "Hold on the overlay icon"
+            hint     = "Click and hold the pill below, then drag it"
+        else:
+            headline = "Move it anywhere on screen!"
+            hint     = "Release the mouse when you are done"
+
+        hf = QFont()
+        hf.setPointSize(20)
+        hf.setWeight(QFont.Weight.Bold)
+        painter.setFont(hf)
+        painter.setPen(QColor(255, 255, 255, 230))
+        h_rect = QRect(0, self.height() // 5, self.width(), 44)
+        painter.drawText(h_rect, Qt.AlignmentFlag.AlignCenter, headline)
+
+        sf = QFont()
+        sf.setPointSize(12)
+        painter.setFont(sf)
+        painter.setPen(QColor(180, 180, 180, 200))
+        s_rect = QRect(0, self.height() // 5 + 50, self.width(), 30)
+        painter.drawText(s_rect, Qt.AlignmentFlag.AlignCenter, hint)
+
+        # Draggable fake pill
+        pr = self._pill_rect()
+        pill_bg = QColor(28, 28, 32, 240) if self._is_dark else QColor(245, 245, 250, 240)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 60)))
+        painter.drawRoundedRect(QRectF(pr).adjusted(3, 4, 3, 4), 25, 25)
+
+        painter.setPen(QPen(QColor(10, 132, 255), 2.5))
+        painter.setBrush(QBrush(pill_bg))
+        painter.drawRoundedRect(QRectF(pr), 25, 25)
+
+        lf = QFont()
+        lf.setPointSize(13)
+        lf.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(lf)
+        painter.setPen(QColor(10, 132, 255))
+        painter.drawText(pr, Qt.AlignmentFlag.AlignCenter, "⬤  Veaja")
+
+        if self._phase == "hold":
+            painter.setPen(QPen(QColor(10, 132, 255, 90), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(pr).adjusted(-10, -10, 10, 10), 33, 33)
+
+    # ── Done paint ────────────────────────────────────────────────────────────
+
+    def _paint_done(self, painter: QPainter):
+        font = QFont()
+        font.setPointSize(60)
+        font.setWeight(QFont.Weight.Black)
+        painter.setFont(font)
+        painter.setPen(QColor(52, 199, 89))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Done ✓")
+
+        sf = QFont()
+        sf.setPointSize(13)
+        painter.setFont(sf)
+        painter.setPen(QColor(200, 200, 200, 200))
+        sub = QRect(0, self.height() // 2 + 60, self.width(), 36)
+        painter.drawText(sub, Qt.AlignmentFlag.AlignCenter,
+                         "Great! Now you know how to drag the overlay pill.")
+
+
 # ── Bubble widget ──────────────────────────────────────────────────────────────
 
 class _Bubble(QWidget):
@@ -200,7 +542,7 @@ class _Bubble(QWidget):
 
     _W = 400   # fixed card width
 
-    def __init__(self, on_prev, on_next, on_skip, parent=None):
+    def __init__(self, on_prev, on_next, on_skip, on_get_started, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Widget)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
@@ -252,6 +594,13 @@ class _Bubble(QWidget):
         self._prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._prev_btn.clicked.connect(on_prev)
 
+        # "Get Started" — only visible on steps with "get_started": True
+        self._gs_btn = QPushButton("▶  Get Started")
+        self._gs_btn.setFixedHeight(36)
+        self._gs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._gs_btn.clicked.connect(on_get_started)
+        self._gs_btn.hide()
+
         self._next_btn = QPushButton("Next →")
         self._next_btn.setFixedHeight(36)
         self._next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -263,6 +612,7 @@ class _Bubble(QWidget):
         self._skip_btn.clicked.connect(on_skip)
 
         btn_row.addWidget(self._prev_btn)
+        btn_row.addWidget(self._gs_btn)    # between ← Back and Next →
         btn_row.addWidget(self._next_btn)
         btn_row.addStretch()
         btn_row.addWidget(self._skip_btn)
@@ -274,7 +624,6 @@ class _Bubble(QWidget):
     def _fmt_body(text: str) -> str:
         """Convert plain body text to styled HTML."""
         escaped = _html.escape(text)
-        # Highlight keyboard shortcuts like Ctrl+R
         escaped = _re.sub(
             r'(Ctrl\+\w+)',
             r'<span style="background:rgba(128,128,128,0.18);'
@@ -288,7 +637,8 @@ class _Bubble(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def update_content(self, step_idx: int, total: int, title: str, body: str):
+    def update_content(self, step_idx: int, total: int, title: str, body: str,
+                       show_get_started: bool = False):
         self._total   = total
         self._current = step_idx
         self._step_label.setText(f"{step_idx + 1} / {total}")
@@ -297,8 +647,9 @@ class _Bubble(QWidget):
         self._prev_btn.setEnabled(step_idx > 0)
         is_last = step_idx == total - 1
         self._next_btn.setText("Done" if is_last else "Next →")
+        self._gs_btn.setVisible(show_get_started)
         self.adjustSize()
-        self.update()   # repaint progress bar
+        self.update()
 
     # ── Paint ─────────────────────────────────────────────────────────────────
 
@@ -332,28 +683,22 @@ class _Bubble(QWidget):
         self._step_label.setStyleSheet(
             f"color: {sub_c.name()}; background: transparent;")
 
-        # Card background
         rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1.0))
         painter.drawRoundedRect(rect, 16, 16)
 
-        # Progress bar — thin line at the very bottom of the card
         if self._total > 1:
-            bar_h  = 3
-            margin = 28
-            bar_y  = self.height() - 14
+            bar_h   = 3
+            margin  = 28
+            bar_y   = self.height() - 14
             track_w = self.width() - margin * 2
             fill_w  = int(track_w * (self._current + 1) / self._total)
 
             painter.setPen(Qt.PenStyle.NoPen)
-
-            # track
             painter.setBrush(QBrush(trk_c))
             painter.drawRoundedRect(
                 QRectF(margin, bar_y, track_w, bar_h), bar_h / 2, bar_h / 2)
-
-            # fill
             if fill_w > 0:
                 painter.setBrush(QBrush(fill_c))
                 painter.drawRoundedRect(
@@ -370,11 +715,13 @@ class TourOverlay(QWidget):
     Live-teaches by navigating to the relevant page before spotlighting.
     """
 
-    def __init__(self, main_window: QWidget):
+    def __init__(self, main_window: QWidget, overlay_widget: QWidget | None = None):
         super().__init__(main_window)
-        self._main  = main_window
-        self._step  = 0
-        self._steps = STEPS
+        self._main           = main_window
+        self._overlay_widget = overlay_widget   # real OverlayWidget (may be None)
+        self._step           = 0
+        self._steps          = STEPS
+        self._trainer: _DragTrainer | None = None
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
@@ -384,6 +731,7 @@ class TourOverlay(QWidget):
             on_prev=self._prev,
             on_next=self._next,
             on_skip=self.close,
+            on_get_started=self._on_get_started,
             parent=self,
         )
 
@@ -412,17 +760,40 @@ class TourOverlay(QWidget):
             tab = step.get("tab")
             self._main.navigate_if_needed(navigate_to, tab=tab)
 
-        # Scroll the settings scroll area so the target widget is fully visible
         widget_attr = step.get("widget_attr")
         if widget_attr:
             target = getattr(self._main, widget_attr, None)
             if target and hasattr(self._main, "_settings_scroll"):
                 self._main._settings_scroll.ensureWidgetVisible(target, 40, 60)
 
+        show_gs = bool(step.get("get_started", False))
         self._bubble.update_content(
-            idx, len(self._steps), step["title"], step["body"])
+            idx, len(self._steps), step["title"], step["body"],
+            show_get_started=show_gs,
+        )
         self._position_bubble(step.get("widget_attr"))
         self.update()
+
+    # ── Interactive drag trainer ───────────────────────────────────────────────
+
+    def _on_get_started(self):
+        """User clicked 'Get Started' — launch the drag mini-tutorial."""
+        is_dark = getattr(self._main, "_dark", False)
+        if self._trainer is None:
+            self._trainer = _DragTrainer(
+                is_dark=is_dark,
+                overlay_widget=self._overlay_widget,
+                parent=self,
+            )
+            self._trainer.finished.connect(self._on_trainer_finished)
+        self._trainer.setGeometry(self.rect())
+        self._trainer.start()
+
+    def _on_trainer_finished(self):
+        """Drag exercise completed — return to the same step."""
+        if self._trainer:
+            self._trainer.hide()
+        self._go_to(self._step)
 
     # ── Spotlight ──────────────────────────────────────────────────────────────
 
@@ -472,18 +843,9 @@ class TourOverlay(QWidget):
         step = self._steps[self._step]
         spot = self._target_rect(step.get("widget_attr"))
 
-        try:
-            is_dark = self._main._dark
-        except AttributeError:
-            is_dark = False
-
-        # Dim the background
         painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
 
         if spot is not None:
-            # Draw the blue focus border directly on top of the dim overlay.
-            # The content inside remains visible through the uniform dim —
-            # no hole-punching, so nothing goes black.
             painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_SourceOver)
             painter.setPen(QPen(QColor(10, 132, 255, 220), 2.0))
@@ -501,11 +863,16 @@ class TourOverlay(QWidget):
     def eventFilter(self, obj, event):
         if obj is self._main and event.type() == QEvent.Type.Resize:
             self.resize(self._main.size())
+            if self._trainer and self._trainer.isVisible():
+                self._trainer.setGeometry(self.rect())
             self._position_bubble(self._steps[self._step].get("widget_attr"))
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         self._main.removeEventFilter(self)
+        if self._trainer:
+            self._trainer.hide()
+            self._trainer = None
         super().closeEvent(event)
 
     def showEvent(self, event):
@@ -540,4 +907,9 @@ class TourOverlay(QWidget):
             base +
             "QPushButton { background: transparent; color: #999; border: none; }"
             "QPushButton:hover { color: #555; }"
+        )
+        self._bubble._gs_btn.setStyleSheet(
+            base +
+            "QPushButton { background: #34C759; color: #fff; border: none; }"
+            "QPushButton:hover { background: #2EB350; }"
         )
