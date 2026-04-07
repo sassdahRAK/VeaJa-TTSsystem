@@ -18,6 +18,7 @@ Signal lifecycle (in order):
 import asyncio
 import os
 import re
+import shutil
 import sys
 import tempfile
 import threading
@@ -375,7 +376,7 @@ class EdgeTTSWorker(QThread):
                 for src in sources:
                     if os.path.exists(src):
                         with open(src, "rb") as f:
-                            out.write(f.read())
+                            shutil.copyfileobj(f, out)  # chunked — avoids loading full MP3 into RAM
         except Exception as exc:
             self.error_occurred.emit(f"Audio save error: {exc}")
 
@@ -485,11 +486,13 @@ class Pyttsx3Worker(QThread):
         self._stop_requested = True
         try:
             if self._engine:
-                self._engine.stop()
+                self._engine.stop()   # interrupts engine.runAndWait()
         except Exception:
             pass
-        self.terminate()
-        self.wait(500)
+        self.requestInterruption()
+        if not self.wait(1500):       # give the thread time to exit cleanly
+            self.terminate()          # last resort — only if still alive after 1.5s
+            self.wait(500)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

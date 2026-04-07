@@ -54,6 +54,11 @@ MAX_SENTENCE_AUDIO_BYTES = 2 * 1024 * 1024   # 2 MB per sentence
 # Prevents hundreds of EdgeTTS requests from being queued for very long pastes.
 MAX_SENTENCE_QUEUE = 50
 
+# Max characters accepted in a single speak() call, applied before language
+# detection.  Prevents O(n) language scanning on very large clipboard pastes
+# (e.g. copying an entire document).  ~50 sentences × 500 chars = 25 000.
+MAX_INPUT_CHARS = 25_000
+
 # EdgeTTS retry settings (Fix #2 — retry on timeout).
 EDGE_TTS_MAX_RETRIES    = 3    # total attempts per sentence before giving up
 EDGE_TTS_RETRY_DELAY_S  = 1.0  # initial backoff delay; doubles each retry

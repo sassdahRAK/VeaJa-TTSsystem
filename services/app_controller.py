@@ -30,6 +30,7 @@ import platform
 from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore    import QObject, QTimer
 
+from config.settings        import MAX_INPUT_CHARS
 from core.tts_engine        import TTSEngine
 from core.selection_monitor import SelectionMonitor
 from core.audio_history     import AudioHistory
@@ -250,6 +251,14 @@ class AppController(QObject):
         """
         if not text.strip():
             return
+
+        # ── Input length cap (applied before language detection) ───────────────
+        if len(text) > MAX_INPUT_CHARS:
+            text = text[:MAX_INPUT_CHARS]
+            self._tray.show_notification(
+                "Veaja — Text truncated",
+                f"Input was too long. Reading the first {MAX_INPUT_CHARS:,} characters.",
+            )
 
         # ── Language filter ────────────────────────────────────────────────────
         try:

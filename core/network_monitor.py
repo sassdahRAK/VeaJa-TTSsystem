@@ -42,6 +42,7 @@ class NetworkMonitor(QObject):
         super().__init__(parent)
         self._online: bool | None = None      # unknown until first check
         self._lock = threading.Lock()
+        self._check_running = False           # guard against overlapping probe threads
 
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
@@ -60,6 +61,10 @@ class NetworkMonitor(QObject):
     # ------------------------------------------------------------------ #
 
     def _schedule_check(self):
+        with self._lock:
+            if self._check_running:
+                return          # previous probe still in flight — skip
+            self._check_running = True
         threading.Thread(target=self._do_check, daemon=True).start()
 
     def _do_check(self):
@@ -68,22 +73,26 @@ class NetworkMonitor(QObject):
         Tries each host in _CHECK_HOSTS in sequence and stops at the first
         successful connection. Reports offline only if ALL probes fail.
         """
-        is_online = False
-        for host, port in _CHECK_HOSTS:
-            try:
-                socket.create_connection(
-                    (host, port), timeout=NETWORK_CHECK_TIMEOUT_S
-                ).close()
-                is_online = True
-                break   # one success is enough
-            except OSError:
-                continue   # try the next host
+        try:
+            is_online = False
+            for host, port in _CHECK_HOSTS:
+                try:
+                    socket.create_connection(
+                        (host, port), timeout=NETWORK_CHECK_TIMEOUT_S
+                    ).close()
+                    is_online = True
+                    break   # one success is enough
+                except OSError:
+                    continue   # try the next host
 
-        with self._lock:
-            if is_online == self._online:
-                return          # no change — nothing to emit
-            self._online = is_online
+            with self._lock:
+                if is_online == self._online:
+                    return          # no change — nothing to emit
+                self._online = is_online
 
-        # Signal is emitted cross-thread; Qt's queued connection delivers it
-        # safely on the main thread.
-        self.connectivity_changed.emit(is_online)
+            # Signal is emitted cross-thread; Qt's queued connection delivers it
+            # safely on the main thread.
+            self.connectivity_changed.emit(is_online)
+        finally:
+            with self._lock:
+                self._check_running = False
