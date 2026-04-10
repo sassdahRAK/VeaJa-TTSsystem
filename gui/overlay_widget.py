@@ -449,7 +449,7 @@ class OverlayWidget(QWidget):
     # ------------------------------------------------------------------ #
 
     def _tick_glow(self) -> None:
-        self._glow_intensity = max(0.0, self._glow_intensity - 0.055)
+        self._glow_intensity = max(0.0, self._glow_intensity - 0.025)
         self._apply_glow_effect()
         if self._glow_intensity <= 0:
             self._glow_timer.stop()
@@ -785,16 +785,28 @@ class OverlayWidget(QWidget):
         painter.setPen(QPen(border, 1.0))
         painter.drawRoundedRect(rect, radius, radius)
 
-        # Glow border — soft concentric rings painted on top of the pill border
+        # Glow border — large soft concentric rings expanding outward from the pill
         if self._anim_glow and self._glow_intensity > 0:
             glow_base = QColor("#FF9500") if self._dark else QColor("#0A84FF")
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            # Four passes: wide+faint → narrow+bright, simulating a soft glow
-            for pen_w, alpha_scale in ((6.0, 0.18), (4.0, 0.35), (2.5, 0.55), (1.5, 0.90)):
+            # Each pass expands the rect outward by `expand` px so glow bleeds outside
+            for expand, pen_w, alpha_scale in (
+                (12.0, 18.0, 0.08),
+                ( 8.0, 12.0, 0.18),
+                ( 5.0,  8.0, 0.35),
+                ( 2.5,  5.0, 0.60),
+                ( 0.5,  2.5, 0.90),
+            ):
                 c = QColor(glow_base)
                 c.setAlpha(int(self._glow_intensity * 255 * alpha_scale))
                 painter.setPen(QPen(c, pen_w))
-                painter.drawRoundedRect(rect, radius, radius)
+                gr = QRectF(
+                    rect.x()      - expand,
+                    rect.y()      - expand,
+                    rect.width()  + expand * 2,
+                    rect.height() + expand * 2,
+                )
+                painter.drawRoundedRect(gr, radius + expand, radius + expand)
 
     # ------------------------------------------------------------------ #
     # Label double-click → free-drag mode

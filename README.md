@@ -46,8 +46,8 @@ Veaja is a lightweight desktop app that turns selected text into speech. Select 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/veaja.git
-cd veaja
+git clone https://github.com/sassdahRAK/VeaJa-TTSsystem.git
+cd VeaJa-TTSsystem
 ```
 
 ### 2. Create a virtual environment

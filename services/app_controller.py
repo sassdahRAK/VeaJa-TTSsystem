@@ -383,6 +383,10 @@ class AppController(QObject):
         self._overlay.set_speaking(True)
         self._main_window.set_read_state(ReadState.SPEAKING)
         self._main_window.mark_reading_started(self._current_text)
+        # Show the overlay so spin/glow animations are visible even when
+        # the user triggered reading from the main window
+        if not self._overlay.isVisible():
+            self._overlay.show_overlay()
 
     def _on_speaking_paused(self) -> None:
         """Audio playback has been paused."""
@@ -404,6 +408,9 @@ class AppController(QObject):
         self._main_window.set_read_state(ReadState.IDLE)
         self._main_window.clear_highlight()
         self._main_window.mark_reading_started("")   # nothing is playing now
+        # If main window is visible, hide the overlay again (it was auto-shown)
+        if self._main_window.isVisible() and self._overlay.isVisible():
+            self._overlay.hide_overlay()
 
     def _on_speaking_error(self, msg: str) -> None:
         """TTS raised an error — reset UI and show a tray notification."""
