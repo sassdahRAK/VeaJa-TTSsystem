@@ -24,6 +24,7 @@ many times in quick succession, producing QTextCursor position errors.
 A 250 ms cooldown window prevents this without losing any real events.
 """
 
+import sys
 import time
 import platform
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
@@ -48,6 +49,7 @@ class SelectionMonitor(QObject):
         super().__init__(parent)
         self._last_text: str = ""
         self._last_emit_time: float = 0.0   # monotonic seconds of last emission
+        self._shutting_down: bool = False   # Fix #6: block signals during teardown
 
         self._clipboard = QApplication.clipboard()
         self._clipboard.dataChanged.connect(self._on_clipboard_change)
@@ -92,6 +94,8 @@ class SelectionMonitor(QObject):
             _last_read_time: list[float] = [0.0]
 
             def _on_copy():
+                if self._shutting_down:             # Fix #6: skip if tearing down
+                    return
                 now = time.monotonic()
                 if now - _last_copy_time[0] < _DEBOUNCE_MS / 1000:
                     return
@@ -99,32 +103,28 @@ class SelectionMonitor(QObject):
                 self._pynput_copy_detected.emit()   # thread-safe ✓
 
             def _on_read():
+                if self._shutting_down:             # Fix #6: skip if tearing down
+                    return
                 now = time.monotonic()
                 if now - _last_read_time[0] < _DEBOUNCE_MS / 1000:
                     return
                 _last_read_time[0] = now
 
-                # Step 1: simulate Ctrl+C to copy the user's current selection.
-                # Ctrl is still held (user pressed Ctrl+R), so we just press C.
-                try:
-                    from pynput.keyboard import Controller as _KbCtrl, Key
-                    _kbd = _KbCtrl()
-                    # Release any lingering modifiers first
-                    for _k in (Key.ctrl, Key.ctrl_l, Key.ctrl_r):
-                        try:
-                            _kbd.release(_k)
-                        except Exception:
-                            pass
-                    time.sleep(0.04)
-                    # Fresh Ctrl+C
-                    _kbd.press(Key.ctrl_l)
-                    _kbd.press('c')
-                    _kbd.release('c')
-                    _kbd.release(Key.ctrl_l)
-                    time.sleep(0.15)   # wait for OS to write clipboard
-                except Exception:
-                    pass
-
+                # Design: Ctrl+R means "read what is currently on the clipboard".
+                #
+                # Previous versions simulated a Ctrl+C keystroke here to copy
+                # the user's current selection before reading.  That approach
+                # caused a critical crash: when the VSCode (or any) terminal had
+                # focus, the simulated Ctrl+C was delivered to the terminal as
+                # SIGINT, raising KeyboardInterrupt in the Python process and
+                # killing the app.
+                #
+                # The safe workflow is:
+                #   1. Select text in any app
+                #   2. Press Ctrl+C  (copies to clipboard; overlay pill appears)
+                #   3. Press Ctrl+R  (reads what is now on the clipboard)
+                #
+                # No keystroke simulation needed — just signal the Qt thread.
                 self._pynput_read_detected.emit()   # thread-safe ✓
 
             self._pynput_listener = keyboard.GlobalHotKeys({
@@ -133,10 +133,16 @@ class SelectionMonitor(QObject):
             })
             self._pynput_listener.daemon = True
             self._pynput_listener.start()
-        except Exception:
+        except Exception as exc:
             # pynput unavailable or no Accessibility permission.
-            # The dataChanged watcher above is still active as fallback.
-            pass
+            # The Qt dataChanged clipboard watcher above is still active as fallback,
+            # but Ctrl+C / Ctrl+R global hotkeys will not work.
+            print(
+                f"[Veaja] Warning: global hotkey listener unavailable: {exc}\n"
+                "         Ctrl+C copy detection via Qt clipboard is still active.\n"
+                "         macOS: grant Accessibility access in System Settings → Privacy.",
+                file=sys.stderr,
+            )
 
     # ------------------------------------------------------------------ #
     # Slots — these always run on the Qt main thread
@@ -153,15 +159,32 @@ class SelectionMonitor(QObject):
 
     @pyqtSlot()
     def _on_read_hotkey_fired(self):
-        """Received on Qt main thread from the Ctrl+R pynput bridge."""
-        QTimer.singleShot(80, self._emit_read_hotkey)
+        """Received on Qt main thread from the Ctrl+R pynput bridge.
+
+        Wrapped in BaseException to guard against KeyboardInterrupt leaking
+        in from the pynput thread (e.g. a stray SIGINT) and crashing the slot.
+        """
+        try:
+            QTimer.singleShot(80, self._emit_read_hotkey)
+        except BaseException as exc:
+            print(f"[Veaja] Warning: _on_read_hotkey_fired caught: {exc}",
+                  file=sys.stderr)
 
     @pyqtSlot()
     def _emit_read_hotkey(self):
-        """Read clipboard and fire the public read_clipboard_hotkey signal."""
+        """Read clipboard and fire the public read_clipboard_hotkey signal.
+
+        The clipboard is cleared 500 ms after reading so that sensitive data
+        (passwords, API keys, medical text) does not linger and remain
+        accessible to other apps or clipboard-history tools.
+        """
         text = self._clipboard.text().strip()
         if text:
             self.read_clipboard_hotkey.emit()
+            # Delay the clear slightly so the app has time to consume the text
+            # before we wipe it. The 500 ms window is enough for _on_read_hotkey
+            # to call set_text() / speak() before the clipboard is emptied.
+            QTimer.singleShot(500, self._clipboard.clear)
 
     @pyqtSlot()
     def _force_check(self):
@@ -198,8 +221,12 @@ class SelectionMonitor(QObject):
     # ------------------------------------------------------------------ #
 
     def stop(self):
+        self._shutting_down = True          # Fix #6: block new signals before stopping
         if self._pynput_listener:
             try:
                 self._pynput_listener.stop()
+                # Give the daemon thread a moment to finish shutting down
+                # before the process exits to avoid pynput teardown errors.
+                time.sleep(0.05)
             except Exception:
                 pass

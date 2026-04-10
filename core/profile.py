@@ -12,6 +12,10 @@ from PyQt6.QtCore import QObject, pyqtSignal
 PROFILE_DIR  = Path.home() / ".veaja"
 PROFILE_PATH = PROFILE_DIR / "profile.json"
 
+# Fix #5: bump this when adding new required fields so _migrate() can upgrade
+# old profiles automatically without the user losing their settings.
+CURRENT_PROFILE_VERSION = 1
+
 DEFAULT_PROFILE: dict = {
     "version":         1,
     "app_name":        "Veaja",
@@ -43,14 +47,30 @@ class ProfileManager(QObject):
 
     def load(self) -> dict:
         """Read profile from disk. Missing / invalid keys fall back to defaults."""
+        # Guarantee the directory exists before trying to open the file inside it.
+        # On a fresh install (or if the user manually deleted ~/.veaja), the open()
+        # below would raise FileNotFoundError without this guard.
+        PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+
         try:
             with open(PROFILE_PATH, encoding="utf-8") as f:
                 data = json.load(f)
             # Merge: defaults first, then saved values (forward-compatible)
-            self._profile = {**DEFAULT_PROFILE, **data}
-            # Validate logo_path — ignore if the file was deleted
-            if self._profile["logo_path"] and \
-               not os.path.exists(self._profile["logo_path"]):
+            merged = {**DEFAULT_PROFILE, **data}
+
+            # Fix #4 — schema validation: strip any keys that are not in
+            # DEFAULT_PROFILE so stale or hand-edited fields don't accumulate.
+            valid_keys = set(DEFAULT_PROFILE.keys())
+            merged = {k: v for k, v in merged.items() if k in valid_keys}
+
+            # Fix #5 — run migration so old profiles gain new required fields.
+            self._profile = self._migrate(merged)
+
+            # Validate logo_path:
+            #   • Must be a str (guard against hand-edited JSON with a number/bool)
+            #   • File must still exist on disk
+            logo = self._profile.get("logo_path")
+            if not isinstance(logo, str) or not os.path.exists(logo):
                 self._profile["logo_path"] = None
         except (FileNotFoundError, json.JSONDecodeError, ValueError):
             self._profile = dict(DEFAULT_PROFILE)
@@ -71,3 +91,22 @@ class ProfileManager(QObject):
     def reset(self):
         """Reset to factory defaults and save."""
         self.save(dict(DEFAULT_PROFILE))
+
+    # ── Migration (Fix #5) ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _migrate(data: dict) -> dict:
+        """Upgrade a saved profile to CURRENT_PROFILE_VERSION in-place.
+
+        Add a new block here whenever DEFAULT_PROFILE gains a required field
+        so that users upgrading from an older release don't lose their settings.
+
+        Example for a future v2 upgrade:
+            if v < 2:
+                data.setdefault("new_field", DEFAULT_PROFILE["new_field"])
+        """
+        v = data.get("version", 0)
+        if v < CURRENT_PROFILE_VERSION:
+            # placeholder — no structural changes between v0 and v1
+            data["version"] = CURRENT_PROFILE_VERSION
+        return data

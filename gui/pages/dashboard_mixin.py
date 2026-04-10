@@ -1,3 +1,21 @@
+"""
+gui/pages/dashboard_mixin.py — Dashboard Page
+==============================================
+
+Provides the Dashboard page UI and logic as a mixin for MainWindow.
+
+Dashboard contains two tabs:
+  • Overlay tab  — shows the text loaded from clipboard / selection.
+                   Words are highlighted in yellow as the overlay pill reads.
+  • Text label   — manual text entry area where the user types or pastes
+                   text and clicks Read to begin playback.
+
+The Read button cycles through three states:
+  IDLE     → click → SPEAKING  (red button)
+  SPEAKING → click → PAUSED    (orange button)
+  PAUSED   → click → SPEAKING  (red button)
+"""
+
 import os
 
 from PyQt6.QtWidgets import (
