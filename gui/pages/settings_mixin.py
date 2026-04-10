@@ -110,6 +110,34 @@ class SettingsMixin:
 
         sc_lay.addWidget(shape_box)
 
+        # ── Animation Overlay ─────────────────────────────────────────────
+        anim_lbl = QLabel("Animation Overlay")
+        anim_lbl.setObjectName("shapeSectionLabel")
+        sc_lay.addWidget(anim_lbl)
+
+        anim_box = QWidget()
+        anim_box.setObjectName("shapeBox")
+        ab_lay = QVBoxLayout(anim_box)
+        ab_lay.setContentsMargins(16, 12, 16, 16)
+        ab_lay.setSpacing(10)
+
+        self._anim_spin_chk = QCheckBox("Logo spin while reading")
+        self._anim_spin_chk.setObjectName("settingsCheck")
+        self._anim_spin_chk.setToolTip("Rotates the Veaja logo while speech is playing")
+        self._anim_spin_chk.toggled.connect(lambda c: self.anim_spin_changed.emit(c))
+        ab_lay.addWidget(self._anim_spin_chk)
+
+        self._anim_glow_chk = QCheckBox("Glow border pulse (voice timing)")
+        self._anim_glow_chk.setObjectName("settingsCheck")
+        self._anim_glow_chk.setToolTip(
+            "Pulses a coloured glow around the logo in sync with each spoken word.\n"
+            "Blue in light mode · Orange in dark mode."
+        )
+        self._anim_glow_chk.toggled.connect(lambda c: self.anim_glow_changed.emit(c))
+        ab_lay.addWidget(self._anim_glow_chk)
+
+        sc_lay.addWidget(anim_box)
+
         # ── Mode + Language ───────────────────────────────────────────────
         ml_row = QHBoxLayout()
         ml_row.setSpacing(0)
@@ -297,7 +325,22 @@ class SettingsMixin:
         return card
 
     def _inline_edit_icon(self) -> QLabel:
-        lbl = QLabel("✎")
+        _svg = (
+            '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M11.5 1.5a1.5 1.5 0 0 1 2.12 2.12l-8.5 8.5-2.83.71.71-2.83z"'
+            ' stroke="#888" stroke-width="1.2" fill="none"'
+            ' stroke-linecap="round" stroke-linejoin="round"/>'
+            '</svg>'
+        )
+        px = QPixmap(13, 13)
+        px.fill(Qt.GlobalColor.transparent)
+        renderer = QSvgRenderer(_svg.encode())
+        p = QPainter(px)
+        renderer.render(p)
+        p.end()
+        lbl = QLabel()
+        lbl.setPixmap(px)
+        lbl.setFixedSize(13, 13)
         lbl.setObjectName("inlineEdit")
         return lbl
 
@@ -356,10 +399,12 @@ class SettingsMixin:
     def _save_settings(self):
         """Collect the current control state, persist via signal, go to dashboard."""
         settings = {
-            "speed":         self._speed_slider.value(),
-            "overlay_shape": "circle" if self._shape_circle.isChecked() else "rectangle",
-            "voice_index":   self._sound_input.currentIndex(),
-            "volume":        self._vol_slider.value() / 100.0,
+            "speed":             self._speed_slider.value(),
+            "overlay_shape":     "circle" if self._shape_circle.isChecked() else "rectangle",
+            "voice_index":       self._sound_input.currentIndex(),
+            "volume":            self._vol_slider.value() / 100.0,
+            "overlay_anim_spin": self._anim_spin_chk.isChecked(),
+            "overlay_anim_glow": self._anim_glow_chk.isChecked(),
         }
         self.settings_save_requested.emit(settings)
         self._navigate(0)   # return to dashboard
@@ -409,6 +454,10 @@ class SettingsMixin:
 
         # 6. Volume → 100 %
         self._vol_slider.setValue(100)     # triggers _on_volume_changed → tts.set_volume
+
+        # 7. Animation overlay → spin on, glow off (defaults)
+        self._anim_spin_chk.setChecked(True)
+        self._anim_glow_chk.setChecked(False)
 
     def _update_settings_reset_icon(self):
         """Refresh the reset button icon to match the current theme."""

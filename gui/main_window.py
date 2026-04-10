@@ -115,6 +115,8 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     settings_save_requested = pyqtSignal(dict)  # emitted when user saves voice settings
     mode_changed           = pyqtSignal(bool)   # True = online
     shape_changed         = pyqtSignal(str)    # "circle" | "rectangle"
+    anim_spin_changed     = pyqtSignal(bool)   # logo spin while reading
+    anim_glow_changed     = pyqtSignal(bool)   # glow border pulse
     tour_requested        = pyqtSignal()
 
     def __init__(self, tts_engine=None):
@@ -539,6 +541,19 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         self._shape_rect.blockSignals(False)
         self.shape_changed.emit(shape)
         self._update_dashboard_pill_icon()
+
+        # Animation overlay checkboxes
+        if hasattr(self, "_anim_spin_chk"):
+            spin = bool(profile.get("overlay_anim_spin", True))
+            glow = bool(profile.get("overlay_anim_glow", False))
+            self._anim_spin_chk.blockSignals(True)
+            self._anim_glow_chk.blockSignals(True)
+            self._anim_spin_chk.setChecked(spin)
+            self._anim_glow_chk.setChecked(glow)
+            self._anim_spin_chk.blockSignals(False)
+            self._anim_glow_chk.blockSignals(False)
+            self.anim_spin_changed.emit(spin)
+            self.anim_glow_changed.emit(glow)
 
         # Volume
         vol_f = float(profile.get("volume", 1.0))

@@ -24,25 +24,13 @@ STEPS = [
     {
         "widget_attr": None,
         "title": "Welcome to Veaja!",
-        "body": (
-            "This live tutorial walks you through every feature.\n\n"
-            "Use Next and Back to navigate, or Skip to close.\n\n"
-            "Each step jumps to the relevant page so you can see "
-            "the feature in context — live!"
-        ),
+        "body": "Tap Next to walk through each feature live.\nUse Back or Skip any time.",
         "navigate_to": None,
     },
     {
         "widget_attr": None,
         "title": "Reading in PDF / Word / Browser",
-        "body": (
-            "Veaja reads text from any application:\n\n"
-            "1. Select text in your PDF, Word, or browser\n"
-            "2. Press Ctrl+R — Veaja reads it immediately\n"
-            "   (or Ctrl+C — the overlay pill appears automatically)\n"
-            "3. The floating pill tracks each word in yellow so you "
-            "can follow along without switching windows."
-        ),
+        "body": "Select text in any app, then press Ctrl+R.\nThe overlay pill highlights each word as it's spoken.",
         "navigate_to": 0,
         "tab": 0,
         "get_started": True,
@@ -50,125 +38,70 @@ STEPS = [
     {
         "widget_attr": "_overlay_text_view",
         "title": "Overlay Tab — Live Preview",
-        "body": (
-            "The Overlay tab shows the text currently loaded "
-            "from your clipboard or selection.\n\n"
-            "When Veaja reads, words are highlighted in yellow "
-            "in the floating pill overlay above all windows."
-        ),
+        "body": "Shows text from your clipboard.\nWords glow yellow in the floating pill while reading.",
         "navigate_to": 0,
         "tab": 0,
     },
     {
         "widget_attr": "_text_edit",
         "title": "Text Label Tab — Type or Paste",
-        "body": (
-            "Type or paste text here, then click Read.\n\n"
-            "While reading, each word is highlighted in yellow "
-            "from left to right — a visual progress bar for your eyes.\n\n"
-            "Tip: paste long articles here for the best experience."
-        ),
+        "body": "Type or paste text, then click Read.\nEach word highlights as it's spoken.",
         "navigate_to": 0,
         "tab": 1,
     },
     {
         "widget_attr": "_read_btn",
         "title": "Read Button",
-        "body": (
-            "Click Read to start speaking.\n\n"
-            "• Click again while speaking → Pause\n"
-            "• Click once more → Resume\n"
-            "• Button turns red while speaking, orange while paused."
-        ),
+        "body": "Click to start. Click again to pause, once more to resume.\nRed = speaking · Orange = paused.",
         "navigate_to": 0,
         "tab": 1,
     },
     {
         "widget_attr": "_online_btn",
         "title": "Online / Offline Mode",
-        "body": (
-            "Online — Microsoft neural voices.\n"
-            "High-quality, human-like. Requires internet.\n\n"
-            "Offline — Windows system voices.\n"
-            "Works without internet. More robotic.\n\n"
-            "Switch here in Settings."
-        ),
+        "body": "Online = natural neural voices (needs internet).\nOffline = system voices, no internet needed.",
         "navigate_to": 1,
     },
     {
         "widget_attr": "_sound_input",
         "title": "Voice Selector",
-        "body": (
-            "Choose your preferred voice.\n\n"
-            "Online voices include regional accents: "
-            "US, UK, and Australian English."
-        ),
+        "body": "Pick your preferred voice.\nOnline mode includes US, UK, and Australian accents.",
         "navigate_to": 1,
     },
     {
         "widget_attr": "_speed_slider",
         "title": "Reading Speed",
-        "body": (
-            "Drag to speed up or slow down.\n\n"
-            "Range: 50 (slow) → 400 (fast).\n"
-            "Default 175 is a natural reading pace."
-        ),
+        "body": "Drag the slider to adjust pace.\nDefault 175 is a natural reading speed.",
         "navigate_to": 1,
     },
     {
         "widget_attr": "_content_stack",
         "title": "Reading History",
-        "body": (
-            "Your last 20 texts are saved here.\n\n"
-            "History is split into Recent, Previous, and Old sections.\n\n"
-            "Double-click any item to load it back into the text box."
-        ),
+        "body": "Your last 20 texts are saved here.\nDouble-click any item to reload it.",
         "navigate_to": 2,
     },
     {
         "widget_attr": "_header_logo",
         "title": "Your Profile",
-        "body": (
-            "Click the avatar or app name in the sidebar to open profile.\n\n"
-            "• Set a custom display name\n"
-            "• Set a profile picture (shown in the overlay pill)\n"
-            "• Choose your word-highlight colour"
-        ),
+        "body": "Click the avatar in the sidebar to edit your profile.\nSet a name, photo, and word-highlight colour.",
         "navigate_to": None,
     },
     {
         "widget_attr": "_content_stack",
         "title": "Ask a Question",
-        "body": (
-            "Find answers to common questions in the Ask a Question section.\n\n"
-            "Topics include: overlay usage, data privacy, "
-            "and platform availability.\n\n"
-            "Use the Email button to contact support."
-        ),
+        "body": "Browse common questions or tap Email to reach support.",
         "navigate_to": 3,
     },
     {
         "widget_attr": "_theme_btn",
         "title": "Dark / Light Mode",
-        "body": (
-            "Toggle between dark and light themes using the "
-            "☀ / ☾ button at the top of the sidebar.\n\n"
-            "The floating overlay and tray icon both "
-            "follow this setting automatically."
-        ),
+        "body": "Use the ☀/☾ button in the sidebar to switch themes.\nThe overlay and tray icon update automatically.",
         "navigate_to": None,
     },
     {
         "widget_attr": None,
         "title": "You're all set!",
-        "body": (
-            "Quick recap for reading third-party documents:\n\n"
-            "1. Open your PDF, Word, or browser\n"
-            "2. Select the text you want\n"
-            "3. Press Ctrl+R — no switching, no copy-paste\n"
-            "4. Watch the overlay pill — it tracks every word in yellow\n\n"
-            "Enjoy Veaja!"
-        ),
+        "body": "Select text anywhere → press Ctrl+R → Veaja reads it.\nEnjoy!",
         "navigate_to": None,
     },
 ]
@@ -634,15 +567,15 @@ class _Bubble(QWidget):
 
         if is_dark:
             bg     = QColor(26, 26, 28, 191)
-            text_c = QColor(229, 57, 53)
-            sub_c  = QColor(220, 80, 70)
+            text_c = QColor(255, 255, 255)
+            sub_c  = QColor(200, 200, 205)
             border = QColor(58, 58, 63, 80)
             trk_c  = QColor(58, 58, 63)
             fill_c = QColor(10, 132, 255)
         else:
             bg     = QColor(255, 255, 255, 191)
-            text_c = QColor(229, 57, 53)
-            sub_c  = QColor(220, 80, 70)
+            text_c = QColor(20, 20, 25)
+            sub_c  = QColor(60, 60, 70)
             border = QColor(210, 210, 215, 80)
             trk_c  = QColor(218, 218, 223)
             fill_c = QColor(10, 132, 255)

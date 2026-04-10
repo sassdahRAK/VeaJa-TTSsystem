@@ -204,10 +204,22 @@ class _LogoCircle(QWidget):
         painter.setClipPath(clip)
 
         if self._pixmap and not self._pixmap.isNull():
-            # Centre the pixmap inside the circle
+            # Apply spin rotation if enabled on parent overlay
+            spin_angle = 0.0
+            try:
+                spin_angle = self.parent()._spin_angle
+            except AttributeError:
+                pass
             x = (LOGO_SIZE - self._pixmap.width())  // 2
             y = (LOGO_SIZE - self._pixmap.height()) // 2
+            if spin_angle:
+                painter.save()
+                painter.translate(LOGO_SIZE / 2, LOGO_SIZE / 2)
+                painter.rotate(spin_angle)
+                painter.translate(-LOGO_SIZE / 2, -LOGO_SIZE / 2)
             painter.drawPixmap(x, y, self._pixmap)
+            if spin_angle:
+                painter.restore()
         else:
             # Fallback: red circle with "V"
             painter.setClipping(False)
@@ -278,6 +290,10 @@ class OverlayWidget(QWidget):
         # because Qt may misread Windows 11 dark mode from QPalette.
         self._dark: bool  = _is_dark_mode()
         self._shape: str  = "circle"   # "circle" | "rectangle"
+        self._anim_spin: bool   = False
+        self._anim_glow: bool   = False
+        self._spin_angle: float = 0.0
+        self._glow_intensity: float = 0.0
 
         self._setup_window()
         self._build_ui()
@@ -409,6 +425,58 @@ class OverlayWidget(QWidget):
         self._anim.setDuration(ANIM_MS)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._anim.valueChanged.connect(self._on_anim_value)
+
+        # Spin timer — rotates the logo ~80°/sec at 60 fps
+        self._spin_timer = QTimer(self)
+        self._spin_timer.setInterval(16)
+        self._spin_timer.timeout.connect(self._tick_spin)
+
+        # Glow timer — fades glow intensity down after each word pulse
+        self._glow_timer = QTimer(self)
+        self._glow_timer.setInterval(30)
+        self._glow_timer.timeout.connect(self._tick_glow)
+
+    # ------------------------------------------------------------------ #
+    # Spin helpers
+    # ------------------------------------------------------------------ #
+
+    def _tick_spin(self) -> None:
+        self._spin_angle = (self._spin_angle + 1.33) % 360.0
+        self._logo.update()
+
+    # ------------------------------------------------------------------ #
+    # Glow helpers
+    # ------------------------------------------------------------------ #
+
+    def _tick_glow(self) -> None:
+        self._glow_intensity = max(0.0, self._glow_intensity - 0.055)
+        self._apply_glow_effect()
+        if self._glow_intensity <= 0:
+            self._glow_timer.stop()
+
+    def _apply_glow_effect(self) -> None:
+        # Trigger a repaint — the glow is drawn in paintEvent
+        self.update()
+
+    # ------------------------------------------------------------------ #
+    # Public animation controls
+    # ------------------------------------------------------------------ #
+
+    def set_anim_spin(self, enabled: bool) -> None:
+        """Enable or disable the logo spin-while-reading animation."""
+        self._anim_spin = enabled
+        if not enabled:
+            self._spin_timer.stop()
+            self._spin_angle = 0.0
+            self._logo.update()
+
+    def set_anim_glow(self, enabled: bool) -> None:
+        """Enable or disable the glow-border-on-word animation."""
+        self._anim_glow = enabled
+        if not enabled:
+            self._glow_timer.stop()
+            self._glow_intensity = 0.0
+            self.update()
 
     def _on_anim_value(self, value: int):
         self._text_panel.setMaximumWidth(value)
@@ -563,12 +631,23 @@ class OverlayWidget(QWidget):
             self._title_label.setText("Speaking…  ■ click to stop")
             self._update_label_colors(speaking=True)   # title → RED
             self._expand()
+            if self._anim_spin:
+                self._spin_timer.start()
         else:
             # Reset body label to plain preview text
             display = self._text if len(self._text) <= 120 else self._text[:117] + "…"
             self._body_label.setText(display)
             self._title_label.setText("Tap to read" if self._text else "Veaja is ready")
             self._update_label_colors()                # restore normal
+            # Stop spin and reset angle
+            self._spin_timer.stop()
+            self._spin_angle = 0.0
+            self._logo.update()
+            # Fade out glow
+            if self._anim_glow:
+                self._glow_intensity = 0.0
+                self._apply_glow_effect()
+                self._glow_timer.stop()
         self.update()
 
     def set_current_word(self, char_start: int, char_end: int):
@@ -580,6 +659,13 @@ class OverlayWidget(QWidget):
         """
         if not self._speaking or not self._text:
             return
+
+        # Glow pulse — spike intensity on each new word
+        if self._anim_glow:
+            self._glow_intensity = 1.0
+            self._apply_glow_effect()
+            if not self._glow_timer.isActive():
+                self._glow_timer.start()
 
         import html as _html
 
@@ -698,6 +784,17 @@ class OverlayWidget(QWidget):
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1.0))
         painter.drawRoundedRect(rect, radius, radius)
+
+        # Glow border — soft concentric rings painted on top of the pill border
+        if self._anim_glow and self._glow_intensity > 0:
+            glow_base = QColor("#FF9500") if self._dark else QColor("#0A84FF")
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            # Four passes: wide+faint → narrow+bright, simulating a soft glow
+            for pen_w, alpha_scale in ((6.0, 0.18), (4.0, 0.35), (2.5, 0.55), (1.5, 0.90)):
+                c = QColor(glow_base)
+                c.setAlpha(int(self._glow_intensity * 255 * alpha_scale))
+                painter.setPen(QPen(c, pen_w))
+                painter.drawRoundedRect(rect, radius, radius)
 
     # ------------------------------------------------------------------ #
     # Label double-click → free-drag mode

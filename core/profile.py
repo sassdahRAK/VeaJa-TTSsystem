@@ -15,14 +15,17 @@ PROFILE_PATH = PROFILE_DIR / "profile.json"
 DEFAULT_PROFILE: dict = {
     "version":         1,
     "app_name":        "Veaja",
-    "logo_path":       None,         # null = use bundled logo
+    "logo_path":                 None,   # null = use bundled logo
+    "overlay_use_profile_photo": False, # use custom photo as overlay logo
     "terms_accepted":  False,
     "highlight_color": "#FFD60A",    # word-highlight colour (yellow)
     "dark_mode":       None,         # None = follow system; True/False = user override
     # Voice settings (persisted by Voice Settings → Save)
     "speed":           175,          # TTS rate, range 50–400
-    "overlay_shape":   "rectangle",  # "circle" | "rectangle"
-    "voice_index":     0,            # index into the current voice list
+    "overlay_shape":     "rectangle",  # "circle" | "rectangle"
+    "overlay_anim_spin": True,         # spin logo while reading
+    "overlay_anim_glow": False,        # glow border pulse with word timing
+    "voice_index":       0,            # index into the current voice list
     "volume":          1.0,          # 0.0–1.0
 }
 

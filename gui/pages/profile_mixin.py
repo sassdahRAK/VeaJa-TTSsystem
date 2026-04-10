@@ -81,29 +81,44 @@ class ProfileMixin:
         photo_row.addWidget(self._profile_photo_frame)
         photo_row.addStretch()
         b_lay.addLayout(photo_row)
-        b_lay.addSpacing(18)
+        b_lay.addSpacing(10)
 
-        # Name row: pencil icon (left) + name input — matching role model layout
+        # Name row: name input + SVG pencil icon (right)
         name_row = QHBoxLayout()
-        name_row.setSpacing(8)
+        name_row.setSpacing(6)
         name_row.addStretch()
-        pencil_lbl = QLabel("✎")
-        pencil_lbl.setObjectName("profilePageEdit")
-        pencil_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        pencil_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-        pencil_lbl.mousePressEvent = lambda _: self._on_profile_choose_photo()
-        name_row.addWidget(pencil_lbl)
         self._profile_name_edit = QLineEdit()
         self._profile_name_edit.setObjectName("profileNameEdit")
         self._profile_name_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._profile_name_edit.setFixedWidth(240)
-        self._profile_name_edit.setFont(QFont("-apple-system", 20, QFont.Weight.Bold))
+        self._profile_name_edit.setFixedWidth(220)
+        self._profile_name_edit.setFont(QFont("Segoe UI", 19, QFont.Weight.DemiBold))
         self._profile_name_edit.setFrame(False)
         self._profile_name_edit.textChanged.connect(self._on_profile_name_preview)
         name_row.addWidget(self._profile_name_edit)
+        # SVG pencil icon — right of the name, clicks focus the name field
+        _pencil_svg = (
+            '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">'
+            '<path d="M11.5 1.5a1.5 1.5 0 0 1 2.12 2.12l-8.5 8.5-2.83.71.71-2.83z"'
+            ' stroke="#888" stroke-width="1.2" fill="none"'
+            ' stroke-linecap="round" stroke-linejoin="round"/>'
+            '</svg>'
+        )
+        from PyQt6.QtSvg import QSvgRenderer as _Svg
+        _rend = _Svg(_pencil_svg.encode())
+        _px = QPixmap(13, 13)
+        _px.fill(Qt.GlobalColor.transparent)
+        _p = QPainter(_px)
+        _rend.render(_p)
+        _p.end()
+        pencil_lbl = QLabel()
+        pencil_lbl.setPixmap(_px)
+        pencil_lbl.setFixedSize(13, 13)
+        pencil_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        pencil_lbl.mousePressEvent = lambda _: self._profile_name_edit.setFocus()
+        name_row.addWidget(pencil_lbl)
         name_row.addStretch()
         b_lay.addLayout(name_row)
-        b_lay.addSpacing(20)
+        b_lay.addSpacing(14)
 
         # Section divider
         divider = QFrame()
@@ -364,9 +379,9 @@ QCheckBox#overlayProfileCb::indicator:checked {{
             bg_in = "transparent"
             self._profile_name_edit.setStyleSheet(
                 f"QLineEdit#profileNameEdit {{"
-                f" background: {bg_in}; color: {txt};"
+                f" background: transparent; color: {txt};"
                 f" border: none;"
-                f" font-size: 20px; font-weight: 700; padding-bottom: 2px; }}"
+                f" font-size: 19px; font-weight: 600; }}"
             )
 
     def _reload_profile_page_photo(self):

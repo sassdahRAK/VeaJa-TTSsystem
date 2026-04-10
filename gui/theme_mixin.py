@@ -102,14 +102,14 @@ class ThemeMixin:
         if self._dark:
             bg      = "#1a1a1c"
             border  = "rgba(255,255,255,0.06)"
-            text_c  = "#c7c7cc"
+            text_c  = "#111111"
             btn_h   = "rgba(255,255,255,0.09)"
             close_h = "#c42b1c"
             close_t = "#ffffff"
         else:
             bg      = "#ececec"
             border  = "rgba(0,0,0,0.10)"
-            text_c  = "#3a3a3c"
+            text_c  = "#ffffff"
             btn_h   = "rgba(0,0,0,0.08)"
             close_h = "#c42b1c"
             close_t = "#ffffff"

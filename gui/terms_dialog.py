@@ -7,7 +7,8 @@ import os
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QCheckBox, QWidget, QScrollArea, QFrame
+    QPushButton, QCheckBox, QWidget, QScrollArea, QFrame,
+    QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
@@ -115,6 +116,20 @@ class TermsDialog(QDialog):
                 "No text is sent to any server — your data never leaves your computer."
             )
 
+        # Wrapper holds accent bar + card content side by side
+        notice_wrapper = QWidget()
+        notice_wrapper.setObjectName("termsNoticeWrapper")
+        nw_lay = QHBoxLayout(notice_wrapper)
+        nw_lay.setContentsMargins(0, 0, 0, 0)
+        nw_lay.setSpacing(0)
+
+        # Glowing 4px left accent bar
+        self._accent_bar = QFrame()
+        self._accent_bar.setObjectName("termsAccentBar")
+        self._accent_bar.setFixedWidth(4)
+        nw_lay.addWidget(self._accent_bar)
+
+        # Card content
         notice_card = QWidget()
         notice_card.setObjectName("termsNoticeCard")
         nc_lay = QVBoxLayout(notice_card)
@@ -143,7 +158,8 @@ class TermsDialog(QDialog):
         mode_body_lbl.setTextFormat(Qt.TextFormat.RichText)
         nc_lay.addWidget(mode_body_lbl)
 
-        body_lay.addWidget(notice_card)
+        nw_lay.addWidget(notice_card, 1)
+        body_lay.addWidget(notice_wrapper)
 
         # ── Section: About Veaja ──────────────────────────────────────────
         about_sec = QLabel("About Veaja")
@@ -232,9 +248,10 @@ class TermsDialog(QDialog):
         card_lay.addWidget(footer)
 
         # Store for style use
-        self._accent     = accent
-        self._badge_bg   = badge_bg
-        self._notice_card = notice_card
+        self._accent        = accent
+        self._badge_bg      = badge_bg
+        self._notice_card   = notice_card
+        self._notice_wrapper = notice_wrapper
 
     # ── Style ─────────────────────────────────────────────────────────────────
 
@@ -262,8 +279,8 @@ class TermsDialog(QDialog):
             notice_border = f"rgba(255,255,255,0.06)"
             cb_c          = "#8e8e93"
             cb_h          = "#f5f5f7"
-            ok_bg         = accent
-            ok_h          = "#c94d22" if accent == "#e05a2b" else "#27946b"
+            ok_bg         = "#1a1a1a"
+            ok_h          = "#333333"
             ok_c          = "#ffffff"
             scrollbar_bg  = "rgba(255,255,255,0.05)"
             scrollbar_h   = "rgba(255,255,255,0.15)"
@@ -290,8 +307,8 @@ class TermsDialog(QDialog):
             notice_border = "rgba(0,0,0,0.06)"
             cb_c          = "#6e6e73"
             cb_h          = "#1a1a1a"
-            ok_bg         = accent
-            ok_h          = "#c94d22" if accent == "#e05a2b" else "#27946b"
+            ok_bg         = "#111111"
+            ok_h          = "#2a2a2a"
             ok_c          = "#ffffff"
             scrollbar_bg  = "rgba(0,0,0,0.05)"
             scrollbar_h   = "rgba(0,0,0,0.15)"
@@ -300,12 +317,29 @@ class TermsDialog(QDialog):
             badge_c       = accent
             lock_c        = "#1a1a1a"
 
-        self._notice_card.setStyleSheet(
-            f"QWidget#termsNoticeCard {{ "
+        # Wrapper: rounded card border
+        self._notice_wrapper.setStyleSheet(
+            f"QWidget#termsNoticeWrapper {{ "
             f"background: {self._badge_bg}; "
             f"border: 1px solid {notice_border}; "
-            f"border-left: 3px solid {accent}; "
             f"border-radius: 10px; }}"
+        )
+        # Accent bar: solid colour + glow shadow
+        self._accent_bar.setStyleSheet(
+            f"QFrame#termsAccentBar {{ "
+            f"background: {accent}; "
+            f"border-top-left-radius: 10px; "
+            f"border-bottom-left-radius: 10px; "
+            f"border: none; }}"
+        )
+        glow = QGraphicsDropShadowEffect(self._accent_bar)
+        glow.setBlurRadius(22)
+        glow.setOffset(0, 0)
+        glow.setColor(QColor(accent))
+        self._accent_bar.setGraphicsEffect(glow)
+        # Card content: transparent, no border
+        self._notice_card.setStyleSheet(
+            "QWidget#termsNoticeCard { background: transparent; border: none; }"
         )
 
         self.setStyleSheet(f"""
@@ -383,9 +417,8 @@ QLabel#termsModeIcon {{
     font-weight: 700;
 }}
 QLabel#termsBadge {{
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 1.2px;
+    font-size: 11px;
+    font-weight: 600;
     color: {badge_c};
     background: transparent;
 }}
