@@ -883,18 +883,18 @@ class _Bubble(QWidget):
 
         # Apply colours to text labels (done here so they react to theme changes)
         self._title.setStyleSheet(
-            f"color:{title_colour.name()}; background:transparent;"
+            f"color:{text_c.name()}; background:transparent;"
         )
         self._body.setStyleSheet(
-            f"color:{body_colour.name()}; background:transparent;"
+            f"color:{sub_c.name()}; background:transparent;"
         )
         self._step_label.setStyleSheet(
-            f"color:{body_colour.name()}; background:transparent;"
+            f"color:{sub_c.name()}; background:transparent;"
         )
 
         # Draw the rounded card background
-        painter.setBrush(QBrush(bg_colour))
-        painter.setPen(QPen(border_colour, 1.0))
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(border, 1.0))
         painter.drawRoundedRect(
             QRectF(0.5, 0.5, self.width() - 1, self.height() - 1),
             16, 16,
@@ -911,14 +911,14 @@ class _Bubble(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
 
             # Grey track (full width)
-            painter.setBrush(QBrush(track_colour))
+            painter.setBrush(QBrush(trk_c))
             painter.drawRoundedRect(
                 QRectF(margin, bar_y, track_w, bar_height), 1.5, 1.5
             )
 
             # Blue fill (proportional to progress)
             if fill_w > 0:
-                painter.setBrush(QBrush(fill_colour))
+                painter.setBrush(QBrush(fill_c))
                 painter.drawRoundedRect(
                     QRectF(margin, bar_y, fill_w, bar_height), 1.5, 1.5
                 )
