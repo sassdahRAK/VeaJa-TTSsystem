@@ -13,25 +13,31 @@ ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
 
 
 def _make_tray_icon(dark_mode: bool) -> QIcon:
-    """Render the SVG logo into a 22×22 tray icon (circular, coloured)."""
+    """Render the PNG logo into a 22×22 circular tray icon."""
     size = 22
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-    # Try SVG  (dark mode → white-face logo; light mode → dark-face logo)
-    svg_name = "logo_light.svg" if dark_mode else "logo_dark.svg"
-    svg_path = os.path.join(ASSETS, svg_name)
+    # PNG logo — dark mode → light logo, light mode → dark logo
+    png_name = "logo_light.png" if dark_mode else "logo_dark.png"
+    png_path = os.path.join(ASSETS, png_name)
     rendered = False
-    if os.path.exists(svg_path):
-        renderer = QSvgRenderer(svg_path)
-        if renderer.isValid():
+    if os.path.exists(png_path):
+        src = QPixmap(png_path)
+        if not src.isNull():
             clip = QPainterPath()
             clip.addEllipse(QRectF(0, 0, size, size))
             painter.setClipPath(clip)
-            renderer.render(painter, QRectF(0, 0, size, size))
+            painter.drawPixmap(
+                0, 0, size, size,
+                src.scaled(size, size,
+                            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                            Qt.TransformationMode.SmoothTransformation)
+            )
             rendered = True
 
     if not rendered:

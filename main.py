@@ -28,7 +28,7 @@ os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon, QPixmap
 
 from gui.splash_screen import SplashScreen
 from services.app_controller import AppController
@@ -42,6 +42,15 @@ def _configure_app(app: QApplication) -> None:
     app.setApplicationDisplayName("Veaja")
     app.setOrganizationName("Veaja")
     app.setOrganizationDomain("veaja.app")
+
+    # Set app-level icon so Windows shows "Veaja" (not "Python") in
+    # taskbar tooltips, notifications, and the Alt+Tab switcher
+    _assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    for _name in ("logo_dark.png", "logo_light.png"):
+        _p = os.path.join(_assets, _name)
+        if os.path.exists(_p):
+            app.setWindowIcon(QIcon(QPixmap(_p)))
+            break
     
 
     system = platform.system()
