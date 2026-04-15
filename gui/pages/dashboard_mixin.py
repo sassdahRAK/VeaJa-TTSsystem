@@ -20,12 +20,23 @@ import os
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QStackedLayout,
-    QLabel, QPushButton, QTextEdit, QScrollArea, QFrame, QSizePolicy
+    QLabel, QPushButton, QTextEdit, QScrollArea, QFrame, QSizePolicy,
+    QTableWidget, QTableWidgetItem, QHeaderView, QComboBox, QAbstractItemView,
+    QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, QPoint
-from PyQt6.QtGui import QPixmap, QPainter
+from PyQt6.QtCore import Qt, QTimer, QPoint, QMimeData
+from PyQt6.QtGui import QPixmap, QPainter, QDrag, QCursor
 
 from gui._window_shared import ASSETS, _make_square_pixmap  # noqa: F401
+
+# Canonical tab definitions: (label, index)
+_TAB_DEFS = [
+    ("Overlay",     0),
+    ("Text label",  1),
+    ("Summary",     2),
+    ("Translate",   3),
+]
+_DEFAULT_TAB_ORDER = [0, 1, 2, 3]
 
 
 class DashboardMixin:
@@ -42,46 +53,67 @@ class DashboardMixin:
 
         title = QLabel("Veaja Feature")
         title.setObjectName("pageTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(title)
         lay.addSpacing(4)
 
-        # Tab bar
-        tab_bar = QWidget()
-        tab_bar.setObjectName("tabBar")
-        tb = QHBoxLayout(tab_bar)
-        tb.setContentsMargins(0, 0, 0, 0)
-        tb.setSpacing(0)
+        # Fade the title out after 3 s using a QTimer + opacity steps
+        self._dashboard_title = title
+        QTimer.singleShot(3000, self._fade_dashboard_title)
 
-        self._tab_overlay_btn = QPushButton("Overlay")
-        self._tab_overlay_btn.setObjectName("tabBtn")
-        self._tab_overlay_btn.setCheckable(True)
-        self._tab_overlay_btn.setChecked(True)
-        self._tab_overlay_btn.setFixedHeight(36)
-        self._tab_overlay_btn.clicked.connect(lambda: self._switch_tab(0))
+        # Tab bar (drag-reorderable)
+        self._tab_bar_widget = _DraggableTabBar(self)
+        lay.addWidget(self._tab_bar_widget)
 
-        self._tab_text_btn = QPushButton("Text label")
-        self._tab_text_btn.setObjectName("tabBtn")
-        self._tab_text_btn.setCheckable(True)
-        self._tab_text_btn.setChecked(False)
-        self._tab_text_btn.setFixedHeight(36)
-        self._tab_text_btn.clicked.connect(lambda: self._switch_tab(1))
-
-        tb.addWidget(self._tab_overlay_btn)
-        tb.addWidget(self._tab_text_btn)
-        tb.addStretch()
-        lay.addWidget(tab_bar)
-
-        # Tab content stack
+        # Tab content stack — always in canonical order (0-3)
         self._tab_stack = QStackedWidget()
-        self._tab_stack.addWidget(self._build_overlay_tab())  # 0
-        self._tab_stack.addWidget(self._build_text_tab())     # 1
+        self._tab_stack.addWidget(self._build_overlay_tab())    # 0
+        self._tab_stack.addWidget(self._build_text_tab())       # 1
+        self._tab_stack.addWidget(self._build_summary_tab())    # 2
+        self._tab_stack.addWidget(self._build_translate_tab())  # 3
         lay.addWidget(self._tab_stack, 1)
         return page
 
-    def _switch_tab(self, idx: int):
-        self._tab_stack.setCurrentIndex(idx)
-        self._tab_overlay_btn.setChecked(idx == 0)
-        self._tab_text_btn.setChecked(idx == 1)
+    def _switch_tab(self, canonical_idx: int):
+        """Show the tab identified by its canonical index (0-3)."""
+        self._tab_stack.setCurrentIndex(canonical_idx)
+        self._tab_bar_widget.set_active(canonical_idx)
+
+    def apply_tab_order(self, order: list):
+        """Restore a saved tab order (list of canonical indices)."""
+        self._tab_bar_widget.apply_order(order)
+
+    def get_tab_order(self) -> list:
+        """Return the current tab order as a list of canonical indices."""
+        return self._tab_bar_widget.current_order()
+
+    def _on_tab_order_changed(self):
+        """Called by _DraggableTabBar after every reorder — persist via signal."""
+        order = self.get_tab_order()
+        # Emit settings_save_requested so AppController persists it
+        self.settings_save_requested.emit({"tab_order": order})
+
+    def _fade_dashboard_title(self):
+        """Gradually fade the 'Veaja Feature' title to invisible over ~600 ms."""
+        if not hasattr(self, "_dashboard_title"):
+            return
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        effect = QGraphicsOpacityEffect(self._dashboard_title)
+        self._dashboard_title.setGraphicsEffect(effect)
+        self._dashboard_title_opacity = 1.0
+        self._dashboard_title_effect  = effect
+
+        def _step():
+            self._dashboard_title_opacity -= 0.08
+            if self._dashboard_title_opacity <= 0:
+                self._dashboard_title_opacity = 0
+                effect.setOpacity(0)
+                self._dashboard_title.setVisible(False)
+                return
+            effect.setOpacity(self._dashboard_title_opacity)
+            QTimer.singleShot(30, _step)
+
+        _step()
 
     def _build_overlay_tab(self) -> QWidget:
         frame = QWidget()
@@ -294,3 +326,507 @@ class DashboardMixin:
         painter.end()
         px.setDevicePixelRatio(dpr)
         pill.setPixmap(px)
+
+    # ── Summary tab ────────────────────────────────────────────────────────────
+
+    def _build_summary_tab(self) -> QWidget:
+        frame = QWidget()
+        frame.setObjectName("tabPage")
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(0, 18, 0, 0)
+        lay.setSpacing(12)
+
+        # ── Sub-tab bar (Normal / Grid) ───────────────────────────────────
+        sub_bar = QWidget()
+        sub_bar.setObjectName("subTabBar")
+        sb_lay = QHBoxLayout(sub_bar)
+        sb_lay.setContentsMargins(0, 0, 0, 0)
+        sb_lay.setSpacing(0)
+
+        self._sum_normal_btn = QPushButton("Normal text")
+        self._sum_normal_btn.setObjectName("subTabBtn")
+        self._sum_normal_btn.setCheckable(True)
+        self._sum_normal_btn.setChecked(True)
+        self._sum_normal_btn.setFixedHeight(30)
+        self._sum_normal_btn.clicked.connect(lambda: self._switch_summary_mode(0))
+
+        self._sum_grid_btn = QPushButton("Grid text")
+        self._sum_grid_btn.setObjectName("subTabBtn")
+        self._sum_grid_btn.setCheckable(True)
+        self._sum_grid_btn.setChecked(False)
+        self._sum_grid_btn.setFixedHeight(30)
+        self._sum_grid_btn.clicked.connect(lambda: self._switch_summary_mode(1))
+
+        sb_lay.addWidget(self._sum_normal_btn)
+        sb_lay.addWidget(self._sum_grid_btn)
+        sb_lay.addStretch()
+        lay.addWidget(sub_bar)
+
+        # ── Input box ─────────────────────────────────────────────────────
+        input_box = QWidget()
+        input_box.setObjectName("featureBox")
+        ib_lay = QVBoxLayout(input_box)
+        ib_lay.setContentsMargins(0, 0, 0, 0)
+        ib_lay.setSpacing(0)
+
+        input_label = QLabel("Text to summarise")
+        input_label.setObjectName("featureLabel")
+        ib_lay.addWidget(input_label)
+
+        self._summary_input = QTextEdit()
+        self._summary_input.setObjectName("featureEdit")
+        self._summary_input.setPlaceholderText("Paste or type the long content you want to summarise…")
+        self._summary_input.setFixedHeight(130)
+        ib_lay.addWidget(self._summary_input)
+        lay.addWidget(input_box)
+
+        # ── Action row ────────────────────────────────────────────────────
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(10)
+        action_row.addStretch()
+
+        clear_sum_btn = QPushButton("Clear")
+        clear_sum_btn.setObjectName("btnOutline")
+        clear_sum_btn.setFixedSize(80, 30)
+        clear_sum_btn.clicked.connect(self._clear_summary)
+        action_row.addWidget(clear_sum_btn)
+
+        summarise_btn = QPushButton("Summarise")
+        summarise_btn.setObjectName("btnPrimary")
+        summarise_btn.setFixedSize(100, 30)
+        summarise_btn.clicked.connect(self._run_summary)
+        action_row.addWidget(summarise_btn)
+        lay.addLayout(action_row)
+
+        # ── Output stack (normal paragraph / grid table) ──────────────────
+        self._summary_output_stack = QStackedWidget()
+
+        # — Normal text output —
+        normal_out_box = QWidget()
+        normal_out_box.setObjectName("featureBox")
+        no_lay = QVBoxLayout(normal_out_box)
+        no_lay.setContentsMargins(0, 0, 0, 0)
+        no_lay.setSpacing(0)
+
+        normal_out_label = QLabel("Summary")
+        normal_out_label.setObjectName("featureLabel")
+        no_lay.addWidget(normal_out_label)
+
+        self._summary_normal_out = QTextEdit()
+        self._summary_normal_out.setObjectName("featureEditReadOnly")
+        self._summary_normal_out.setReadOnly(True)
+        self._summary_normal_out.setPlaceholderText("Summary will appear here…")
+        no_lay.addWidget(self._summary_normal_out, 1)
+        self._summary_output_stack.addWidget(normal_out_box)  # index 0
+
+        # — Grid text output —
+        grid_out_box = QWidget()
+        grid_out_box.setObjectName("featureBox")
+        go_lay = QVBoxLayout(grid_out_box)
+        go_lay.setContentsMargins(0, 0, 0, 0)
+        go_lay.setSpacing(0)
+
+        grid_out_label = QLabel("Key points")
+        grid_out_label.setObjectName("featureLabel")
+        go_lay.addWidget(grid_out_label)
+
+        self._summary_grid_out = QTableWidget(0, 2)
+        self._summary_grid_out.setObjectName("summaryGrid")
+        self._summary_grid_out.setHorizontalHeaderLabels(["Point", "Detail"])
+        self._summary_grid_out.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self._summary_grid_out.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._summary_grid_out.verticalHeader().setVisible(False)
+        self._summary_grid_out.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._summary_grid_out.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._summary_grid_out.setAlternatingRowColors(True)
+        go_lay.addWidget(self._summary_grid_out, 1)
+        self._summary_output_stack.addWidget(grid_out_box)  # index 1
+
+        lay.addWidget(self._summary_output_stack, 1)
+        return frame
+
+    def _switch_summary_mode(self, idx: int):
+        self._sum_normal_btn.setChecked(idx == 0)
+        self._sum_grid_btn.setChecked(idx == 1)
+        self._summary_output_stack.setCurrentIndex(idx)
+
+    def _clear_summary(self):
+        self._summary_input.clear()
+        self._summary_normal_out.clear()
+        self._summary_grid_out.setRowCount(0)
+
+    def _run_summary(self):
+        """Summarise the input text. Uses a simple extractive approach (no external API)."""
+        text = self._summary_input.toPlainText().strip()
+        if not text:
+            return
+
+        sentences = [s.strip() for s in text.replace("\n", " ").split(".") if s.strip()]
+
+        # ── Normal text: first ~3 sentences as a paragraph ────────────────
+        normal_result = ". ".join(sentences[:3])
+        if normal_result and not normal_result.endswith("."):
+            normal_result += "."
+        self._summary_normal_out.setPlainText(normal_result)
+
+        # ── Grid text: each sentence becomes a row ─────────────────────────
+        self._summary_grid_out.setRowCount(0)
+        for i, sentence in enumerate(sentences[:10], start=1):
+            row = self._summary_grid_out.rowCount()
+            self._summary_grid_out.insertRow(row)
+            point_item = QTableWidgetItem(f"Point {i}")
+            detail_item = QTableWidgetItem(sentence + ".")
+            point_item.setTextAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            detail_item.setTextAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            self._summary_grid_out.setItem(row, 0, point_item)
+            self._summary_grid_out.setItem(row, 1, detail_item)
+        self._summary_grid_out.resizeRowsToContents()
+
+    # ── Translate tab ──────────────────────────────────────────────────────────
+
+    def _build_translate_tab(self) -> QWidget:
+        frame = QWidget()
+        frame.setObjectName("tabPage")
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(0, 18, 0, 0)
+        lay.setSpacing(12)
+
+        # ── Language selector row ─────────────────────────────────────────
+        lang_row = QHBoxLayout()
+        lang_row.setContentsMargins(0, 0, 0, 0)
+        lang_row.setSpacing(10)
+
+        from_label = QLabel("From")
+        from_label.setObjectName("featureLabel")
+        from_label.setFixedWidth(36)
+        lang_row.addWidget(from_label)
+
+        self._translate_from_combo = QComboBox()
+        self._translate_from_combo.setObjectName("translateCombo")
+        self._translate_from_combo.setFixedHeight(30)
+        for lang in ["Auto detect", "English", "Thai", "French", "Spanish",
+                     "German", "Japanese", "Chinese", "Korean", "Arabic"]:
+            self._translate_from_combo.addItem(lang)
+        lang_row.addWidget(self._translate_from_combo)
+
+        arrow_lbl = QLabel("→")
+        arrow_lbl.setObjectName("featureLabel")
+        arrow_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lang_row.addWidget(arrow_lbl)
+
+        to_label = QLabel("To")
+        to_label.setObjectName("featureLabel")
+        to_label.setFixedWidth(20)
+        lang_row.addWidget(to_label)
+
+        self._translate_to_combo = QComboBox()
+        self._translate_to_combo.setObjectName("translateCombo")
+        self._translate_to_combo.setFixedHeight(30)
+        for lang in ["English", "Thai", "French", "Spanish",
+                     "German", "Japanese", "Chinese", "Korean", "Arabic"]:
+            self._translate_to_combo.addItem(lang)
+        lang_row.addWidget(self._translate_to_combo)
+
+        lang_row.addStretch()
+
+        translate_btn = QPushButton("Translate")
+        translate_btn.setObjectName("btnPrimary")
+        translate_btn.setFixedSize(100, 30)
+        translate_btn.clicked.connect(self._run_translate)
+        lang_row.addWidget(translate_btn)
+
+        lay.addLayout(lang_row)
+
+        # ── Two-panel layout: input | output ──────────────────────────────
+        panels = QHBoxLayout()
+        panels.setContentsMargins(0, 0, 0, 0)
+        panels.setSpacing(14)
+
+        # Input panel
+        in_box = QWidget()
+        in_box.setObjectName("featureBox")
+        in_lay = QVBoxLayout(in_box)
+        in_lay.setContentsMargins(0, 0, 0, 0)
+        in_lay.setSpacing(0)
+
+        in_header = QHBoxLayout()
+        in_header.setContentsMargins(0, 0, 0, 6)
+        in_lbl = QLabel("Source text")
+        in_lbl.setObjectName("featureLabel")
+        in_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        in_header.addWidget(in_lbl)
+        in_header.addStretch()
+        clear_tr_btn = QPushButton("Clear")
+        clear_tr_btn.setObjectName("btnOutline")
+        clear_tr_btn.setFixedSize(80, 28)
+        clear_tr_btn.clicked.connect(self._clear_translate)
+        in_header.addWidget(clear_tr_btn)
+        in_lay.addLayout(in_header)
+
+        self._translate_input = QTextEdit()
+        self._translate_input.setObjectName("featureEdit")
+        self._translate_input.setPlaceholderText("Paste or type text to translate…")
+        in_lay.addWidget(self._translate_input, 1)
+
+        # Character counter
+        self._translate_counter = QLabel("0 chars")
+        self._translate_counter.setObjectName("settingsLabel")
+        self._translate_counter.setStyleSheet("font-size: 11px;")
+        self._translate_counter.setAlignment(Qt.AlignmentFlag.AlignRight)
+        in_lay.addWidget(self._translate_counter)
+        self._translate_input.textChanged.connect(self._on_translate_input_changed)
+
+        panels.addWidget(in_box, 1)
+
+        # Output panel
+        out_box = QWidget()
+        out_box.setObjectName("featureBox")
+        out_lay = QVBoxLayout(out_box)
+        out_lay.setContentsMargins(0, 0, 0, 0)
+        out_lay.setSpacing(0)
+
+        out_header = QHBoxLayout()
+        out_header.setContentsMargins(0, 0, 0, 6)
+        out_lbl = QLabel("Translation")
+        out_lbl.setObjectName("featureLabel")
+        out_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        out_header.addWidget(out_lbl)
+        out_header.addStretch()
+        copy_btn = QPushButton("Copy")
+        copy_btn.setObjectName("btnOutline")
+        copy_btn.setFixedSize(80, 28)
+        copy_btn.clicked.connect(self._copy_translation)
+        out_header.addWidget(copy_btn)
+        out_lay.addLayout(out_header)
+
+        self._translate_output = QTextEdit()
+        self._translate_output.setObjectName("featureEditReadOnly")
+        self._translate_output.setReadOnly(True)
+        self._translate_output.setPlaceholderText("Translation will appear here…")
+        out_lay.addWidget(self._translate_output, 1)
+
+        # Placeholder note
+        self._translate_note = QLabel("Translation requires an internet connection and API key.")
+        self._translate_note.setObjectName("settingsLabel")
+        self._translate_note.setStyleSheet("font-size: 11px;")
+        self._translate_note.setAlignment(Qt.AlignmentFlag.AlignRight)
+        out_lay.addWidget(self._translate_note)
+
+        panels.addWidget(out_box, 1)
+        lay.addLayout(panels, 1)
+        return frame
+
+    def _on_translate_input_changed(self):
+        chars = len(self._translate_input.toPlainText())
+        self._translate_counter.setText(f"{chars} char{'s' if chars != 1 else ''}")
+
+    def _clear_translate(self):
+        self._translate_input.clear()
+        self._translate_output.clear()
+
+    def _copy_translation(self):
+        from PyQt6.QtWidgets import QApplication
+        text = self._translate_output.toPlainText()
+        if text:
+            QApplication.clipboard().setText(text)
+
+    def _run_translate(self):
+        """Placeholder translation — shows a message until an API is wired up."""
+        text = self._translate_input.toPlainText().strip()
+        if not text:
+            return
+        from_lang = self._translate_from_combo.currentText()
+        to_lang   = self._translate_to_combo.currentText()
+        self._translate_output.setPlainText(
+            f"[Translation from {from_lang} → {to_lang}]\n\n"
+            "Connect a translation API (e.g. Google Translate, DeepL, or LibreTranslate) "
+            "to enable live translation. The input text has been received and is ready to send."
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Drag-reorderable tab bar
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _DraggableTabBar(QWidget):
+    """
+    A horizontal tab bar whose buttons can be reordered by dragging.
+
+    • Click  → switch to that tab (calls mixin._switch_tab with canonical idx)
+    • Drag   → reorder; a ghost indicator line shows the drop position
+    • Order  → persisted via mixin.get_tab_order() / apply_tab_order()
+    """
+
+    _DRAG_THRESHOLD = 6   # px before a press becomes a drag
+
+    def __init__(self, mixin, parent=None):
+        super().__init__(parent)
+        self._mixin   = mixin
+        self._order   = list(_DEFAULT_TAB_ORDER)   # canonical indices in display order
+        self._active  = 0                          # canonical index of active tab
+
+        # Drag state
+        self._drag_btn_idx: int | None = None      # position index being dragged
+        self._drag_press_pos: QPoint | None = None
+        self._dragging = False
+        self._drop_pos: int | None = None          # insertion position indicator
+
+        self.setObjectName("tabBar")
+        self.setFixedHeight(36)
+
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+
+        self._buttons: list[QPushButton] = []
+        self._rebuild_buttons()
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_active(self, canonical_idx: int):
+        self._active = canonical_idx
+        self._refresh_checked()
+
+    def apply_order(self, order: list):
+        """Restore a saved order (list of canonical indices)."""
+        if (isinstance(order, list)
+                and len(order) == len(_DEFAULT_TAB_ORDER)
+                and sorted(order) == sorted(_DEFAULT_TAB_ORDER)):
+            self._order = list(order)
+        self._rebuild_buttons()
+        # Show the first tab in the restored order
+        if self._order:
+            first = self._order[0]
+            self._active = first
+            self._mixin._tab_stack.setCurrentIndex(first)
+            self._refresh_checked()
+
+    def current_order(self) -> list:
+        return list(self._order)
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _rebuild_buttons(self):
+        # Remove ALL items from the layout (buttons + accumulated stretches)
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        self._buttons.clear()
+
+        for pos, canonical in enumerate(self._order):
+            label, _ = _TAB_DEFS[canonical]
+            btn = QPushButton(label)
+            btn.setObjectName("tabBtn")
+            btn.setCheckable(True)
+            btn.setFixedHeight(36)
+            btn.setCursor(Qt.CursorShape.OpenHandCursor)
+
+            btn.mousePressEvent   = lambda ev, i=pos: self._btn_press(ev, i)
+            btn.mouseMoveEvent    = lambda ev, i=pos: self._btn_move(ev, i)
+            btn.mouseReleaseEvent = lambda ev, i=pos, c=canonical: self._btn_release(ev, i, c)
+
+            self._layout.addWidget(btn)
+            self._buttons.append(btn)
+
+        # Single stretch at the end
+        self._layout.addStretch()
+        self._refresh_checked()
+
+    def _refresh_checked(self):
+        for pos, canonical in enumerate(self._order):
+            if pos < len(self._buttons):
+                self._buttons[pos].setChecked(canonical == self._active)
+
+    def _btn_press(self, ev, pos: int):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._drag_btn_idx  = pos
+            self._drag_press_pos = ev.globalPosition().toPoint()
+            self._dragging = False
+        ev.accept()
+
+    def _btn_move(self, ev, pos: int):
+        if not (ev.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if self._drag_press_pos is None:
+            return
+
+        delta = (ev.globalPosition().toPoint() - self._drag_press_pos).manhattanLength()
+        if not self._dragging and delta > self._DRAG_THRESHOLD:
+            self._dragging = True
+            self._buttons[pos].setCursor(Qt.CursorShape.ClosedHandCursor)
+
+        if self._dragging:
+            local_x = self.mapFromGlobal(ev.globalPosition().toPoint()).x()
+            self._drop_pos = self._x_to_insert_pos(local_x)
+            self.update()
+        ev.accept()
+
+    def _btn_release(self, ev, pos: int, canonical: int):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            was_dragging = self._dragging
+            if was_dragging and self._drop_pos is not None:
+                self._do_reorder(self._drag_btn_idx, self._drop_pos)
+            self._dragging       = False
+            self._drop_pos       = None
+            self._drag_btn_idx   = None
+            self._drag_press_pos = None
+            if pos < len(self._buttons):
+                self._buttons[pos].setCursor(Qt.CursorShape.OpenHandCursor)
+            self.update()
+            # Fire the tab switch only on a plain click (no drag occurred)
+            if not was_dragging:
+                self._mixin._switch_tab(canonical)
+        ev.accept()
+
+    def _x_to_insert_pos(self, x: int) -> int:
+        """Return the insertion index (0..n) closest to pixel x."""
+        n = len(self._buttons)
+        for i, btn in enumerate(self._buttons):
+            mid = btn.x() + btn.width() // 2
+            if x < mid:
+                return i
+        return n
+
+    def _do_reorder(self, from_pos: int, to_pos: int):
+        if from_pos is None:
+            return
+        # Clamp
+        to_pos = max(0, min(to_pos, len(self._order)))
+        if from_pos == to_pos or from_pos + 1 == to_pos:
+            return
+        item = self._order.pop(from_pos)
+        # Adjust insertion index after removal
+        if to_pos > from_pos:
+            to_pos -= 1
+        self._order.insert(to_pos, item)
+        self._rebuild_buttons()
+        # Persist immediately
+        self._mixin._on_tab_order_changed()
+
+    # ── Drop indicator painting ────────────────────────────────────────────────
+
+    def paintEvent(self, ev):
+        super().paintEvent(ev)
+        if not self._dragging or self._drop_pos is None:
+            return
+        from PyQt6.QtGui import QPainter, QColor, QPen
+        painter = QPainter(self)
+        pen = QPen(QColor("#ffffff" if self._is_dark() else "#1a1a1a"), 2)
+        painter.setPen(pen)
+        x = self._insert_x(self._drop_pos)
+        painter.drawLine(x, 4, x, self.height() - 4)
+        painter.end()
+
+    def _insert_x(self, pos: int) -> int:
+        n = len(self._buttons)
+        if pos == 0:
+            return self._buttons[0].x() if self._buttons else 0
+        if pos >= n:
+            b = self._buttons[-1]
+            return b.x() + b.width()
+        return self._buttons[pos].x()
+
+    def _is_dark(self) -> bool:
+        return getattr(self._mixin, "_dark", False)

@@ -118,6 +118,7 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     anim_spin_changed     = pyqtSignal(bool)   # logo spin while reading
     anim_glow_changed     = pyqtSignal(bool)   # glow border pulse
     tour_requested        = pyqtSignal()
+    lang_changed          = pyqtSignal(str)    # "en" | "fr"
 
     def __init__(self, tts_engine=None):
         super().__init__()
@@ -518,6 +519,10 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
                 self._toggle_theme()
         # Restore voice settings
         self._apply_voice_settings(profile)
+        # Restore tab order
+        tab_order = profile.get("tab_order")
+        if tab_order and hasattr(self, "_tab_bar_widget"):
+            self.apply_tab_order(tab_order)
 
     def _apply_voice_settings(self, profile: dict):
         """Restore Voice Settings controls and TTS engine state from a profile dict."""

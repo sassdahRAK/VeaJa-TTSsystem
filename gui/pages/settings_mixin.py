@@ -1,3 +1,4 @@
+from operator import index
 import os
 
 from PyQt6.QtWidgets import (
@@ -14,6 +15,25 @@ from gui.icon_utils import svg_icon
 
 class SettingsMixin:
     """Mixin providing Voice Setting page methods for MainWindow."""
+
+    # ── Language map — single source of truth ─────────────────────────────────
+    _LANG_ITEMS: list[tuple[str, str]] = [
+        ("English",    "en"),
+        ("French",     "fr"),
+        ("Khmer",      "km"),
+        ("Chinese",    "zh"),
+        ("Japanese",   "ja"),
+        ("Korean",     "ko"),
+        ("Thai",       "th"),
+        ("Hindi",      "hi"),
+        ("Arabic",     "ar"),
+        ("German",     "de"),
+        ("Spanish",    "es"),
+        ("Portuguese", "pt"),
+        ("Russian",    "ru"),
+        ("Vietnamese", "vi"),
+        ("Indonesian", "id"),
+    ]
 
     # ── Voice Setting page ─────────────────────────────────────────────────────
 
@@ -184,7 +204,9 @@ class SettingsMixin:
         self._lang_combo = QComboBox()
         self._lang_combo.setObjectName("settingsCombo")
         self._lang_combo.setFixedWidth(160)
-        self._lang_combo.addItem("English")
+        for display_name, _ in self._LANG_ITEMS:
+            self._lang_combo.addItem(display_name)
+        self._lang_combo.currentIndexChanged.connect(self._on_lang_changed)
         lang_inline.addWidget(self._lang_combo)
         lang_inline.addWidget(self._inline_edit_icon())
         lang_block.addLayout(lang_inline)
@@ -357,6 +379,14 @@ class SettingsMixin:
         self._online_btn.setChecked(not checked)
         self._online_btn.blockSignals(False)
         self.mode_changed.emit(not checked)  # True = online, so offline → emit False
+
+    def _on_lang_changed(self, index: int):
+        """Language combo changed — notify AppController."""
+        if 0 <= index < len(self._LANG_ITEMS):
+            lang_code = self._LANG_ITEMS[index][1]
+        else:
+            lang_code = "en"
+        self.lang_changed.emit(lang_code)
 
     def update_connection_status(self, is_online: bool):
         """Called by AppController whenever internet connectivity changes.

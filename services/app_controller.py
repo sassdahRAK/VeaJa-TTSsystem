@@ -120,6 +120,7 @@ class AppController(QObject):
         self._main_window.mode_changed.connect(self._on_mode_changed)
         self._main_window.settings_save_requested.connect(self._on_settings_save)
         self._main_window.tour_requested.connect(self._show_tour)
+        self._main_window.lang_changed.connect(self._on_lang_changed)  # ADD THIS
 
         # Profile page live save (e.g. overlay-show checkbox toggle)
         self._main_window.profile_save_requested.connect(
@@ -263,22 +264,21 @@ class AppController(QObject):
             )
 
         # ── Language filter ────────────────────────────────────────────────────
+        active_lang = self._tts.get_active_language()   # ADD THIS
         try:
             filtered, was_filtered, detected_lang = filter_for_tts(
-                text, target_lang="en"
+                text, target_lang=active_lang            # CHANGE "en" → active_lang
             )
         except Exception:
-            # filter_for_tts should never raise, but be safe
-            filtered, was_filtered, detected_lang = text, False, "en"
+            filtered, was_filtered, detected_lang = text, False, active_lang
 
         if not filtered.strip():
-            # Nothing readable in English — notify and abort gracefully
             lang_name = language_display_name(detected_lang)
             self._tray.show_notification(
                 "Veaja — Language not supported",
-                f"No English text found in selection. "
+                f"No {language_display_name(active_lang)} text found in selection. "
                 f"(Detected: {lang_name})\n"
-                "Switch to Offline mode or select English text.",
+                "Switch language or select matching text.",
             )
             return
 
@@ -450,6 +450,12 @@ class AppController(QObject):
         profile = self._profile.get()
         profile.update(settings)
         self._profile.save(profile)
+
+    def _on_lang_changed(self, lang: str) -> None:
+        """User selected a different language — switch TTS voices to native speakers."""
+        self._tts.set_language(lang)
+        voices = self._tts.get_voices()
+        self._main_window.populate_voices(voices)
 
     def _on_connectivity_changed(self, is_online: bool) -> None:
         """

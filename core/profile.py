@@ -14,7 +14,7 @@ PROFILE_PATH = PROFILE_DIR / "profile.json"
 
 # Fix #5: bump this when adding new required fields so _migrate() can upgrade
 # old profiles automatically without the user losing their settings.
-CURRENT_PROFILE_VERSION = 1
+CURRENT_PROFILE_VERSION = 2
 
 DEFAULT_PROFILE: dict = {
     "version":         1,
@@ -31,6 +31,7 @@ DEFAULT_PROFILE: dict = {
     "overlay_anim_glow": False,        # glow border pulse with word timing
     "voice_index":       0,            # index into the current voice list
     "volume":          1.0,          # 0.0–1.0
+    "tab_order":       [0, 1, 2, 3], # dashboard tab display order (canonical indices)
 }
 
 
@@ -107,6 +108,8 @@ class ProfileManager(QObject):
         """
         v = data.get("version", 0)
         if v < CURRENT_PROFILE_VERSION:
-            # placeholder — no structural changes between v0 and v1
+            # v0 → v1: no structural changes
+            # v1 → v2: add tab_order field
+            data.setdefault("tab_order", [0, 1, 2, 3])
             data["version"] = CURRENT_PROFILE_VERSION
         return data

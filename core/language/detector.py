@@ -63,20 +63,21 @@ _SCRIPT_RANGES: list[tuple[int, int, str]] = [
 # "tts_supported" = True  → Veaja can already read this language
 # Add entries as new backends are integrated
 VOICE_CATALOGUE: dict[str, dict] = {
-    "en": {"name": "English",    "tts_supported": True,  "edge_locale": "en-US"},
-    "zh": {"name": "Chinese",    "tts_supported": False, "edge_locale": "zh-CN"},
-    "ja": {"name": "Japanese",   "tts_supported": False, "edge_locale": "ja-JP"},
-    "ko": {"name": "Korean",     "tts_supported": False, "edge_locale": "ko-KR"},
-    "th": {"name": "Thai",       "tts_supported": False, "edge_locale": "th-TH"},
-    "hi": {"name": "Hindi",      "tts_supported": False, "edge_locale": "hi-IN"},
-    "ar": {"name": "Arabic",     "tts_supported": False, "edge_locale": "ar-EG"},
-    "fr": {"name": "French",     "tts_supported": False, "edge_locale": "fr-FR"},
-    "de": {"name": "German",     "tts_supported": False, "edge_locale": "de-DE"},
-    "es": {"name": "Spanish",    "tts_supported": False, "edge_locale": "es-ES"},
-    "pt": {"name": "Portuguese", "tts_supported": False, "edge_locale": "pt-BR"},
-    "ru": {"name": "Russian",    "tts_supported": False, "edge_locale": "ru-RU"},
-    "vi": {"name": "Vietnamese", "tts_supported": False, "edge_locale": "vi-VN"},
-    "id": {"name": "Indonesian", "tts_supported": False, "edge_locale": "id-ID"},
+    "en": {"name": "English",    "tts_supported": True, "edge_locale": "en-US"},
+    "zh": {"name": "Chinese",    "tts_supported": True, "edge_locale": "zh-CN"},
+    "ja": {"name": "Japanese",   "tts_supported": True, "edge_locale": "ja-JP"},
+    "ko": {"name": "Korean",     "tts_supported": True, "edge_locale": "ko-KR"},
+    "th": {"name": "Thai",       "tts_supported": True, "edge_locale": "th-TH"},
+    "hi": {"name": "Hindi",      "tts_supported": True, "edge_locale": "hi-IN"},
+    "ar": {"name": "Arabic",     "tts_supported": True, "edge_locale": "ar-EG"},
+    "fr": {"name": "French",     "tts_supported": True, "edge_locale": "fr-FR"},
+    "de": {"name": "German",     "tts_supported": True, "edge_locale": "de-DE"},
+    "es": {"name": "Spanish",    "tts_supported": True, "edge_locale": "es-ES"},
+    "pt": {"name": "Portuguese", "tts_supported": True, "edge_locale": "pt-BR"},
+    "ru": {"name": "Russian",    "tts_supported": True, "edge_locale": "ru-RU"},
+    "vi": {"name": "Vietnamese", "tts_supported": True, "edge_locale": "vi-VN"},
+    "id": {"name": "Indonesian", "tts_supported": True, "edge_locale": "id-ID"},
+    "km": {"name": "Khmer",      "tts_supported": True, "edge_locale": "km-KH"},
 }
 
 
@@ -162,6 +163,152 @@ def is_english(text: str) -> bool:
         return _non_latin_ratio(text) < 0.20   # allow up to 20 % non-Latin
     except Exception:
         return True
+
+
+def is_french(text: str) -> bool:
+    """
+    Return True when *text* is predominantly French.
+    Never raises.
+    """
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "fr"
+    except Exception:
+        return False
+
+
+def is_khmer(text: str) -> bool:
+    """
+    Return True when *text* is predominantly Khmer.
+    Never raises.
+    """
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "km"
+    except Exception:
+        return False
+
+
+def is_chinese(text: str) -> bool:
+    """Return True when *text* is predominantly Chinese. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "zh"
+    except Exception:
+        return False
+
+
+def is_japanese(text: str) -> bool:
+    """Return True when *text* is predominantly Japanese. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "ja"
+    except Exception:
+        return False
+
+
+def is_korean(text: str) -> bool:
+    """Return True when *text* is predominantly Korean. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "ko"
+    except Exception:
+        return False
+
+
+def is_thai(text: str) -> bool:
+    """Return True when *text* is predominantly Thai. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "th"
+    except Exception:
+        return False
+
+
+def is_hindi(text: str) -> bool:
+    """Return True when *text* is predominantly Hindi. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "hi"
+    except Exception:
+        return False
+
+
+def is_arabic(text: str) -> bool:
+    """Return True when *text* is predominantly Arabic. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "ar"
+    except Exception:
+        return False
+
+
+def is_german(text: str) -> bool:
+    """Return True when *text* is predominantly German. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "de"
+    except Exception:
+        return False
+
+
+def is_spanish(text: str) -> bool:
+    """Return True when *text* is predominantly Spanish. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "es"
+    except Exception:
+        return False
+
+
+def is_portuguese(text: str) -> bool:
+    """Return True when *text* is predominantly Portuguese. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "pt"
+    except Exception:
+        return False
+
+
+def is_russian(text: str) -> bool:
+    """Return True when *text* is predominantly Russian. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "ru"
+    except Exception:
+        return False
+
+
+def is_vietnamese(text: str) -> bool:
+    """Return True when *text* is predominantly Vietnamese. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "vi"
+    except Exception:
+        return False
+
+
+def is_indonesian(text: str) -> bool:
+    """Return True when *text* is predominantly Indonesian. Never raises."""
+    if not text or not text.strip():
+        return False
+    try:
+        return detect_language(text) == "id"
+    except Exception:
+        return False
 
 
 def extract_english(text: str) -> str:
@@ -254,9 +401,11 @@ def filter_for_tts(
         #     from core.language.backends.zh import filter_chinese
         #     return filter_chinese(text), False, detected
         else:
-            # Language not yet supported — return English portion as fallback
-            filtered = extract_english(text)
-            return filtered, True, detected
+             # For supported non-English languages, pass text through as-is
+             if detected == target_lang:
+                  return text, False, detected
+             # Mixed content — pass through anyway and let the TTS handle it
+             return text, False, detected
 
     except Exception:
         # Crash-proof last resort

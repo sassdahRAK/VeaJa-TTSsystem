@@ -41,17 +41,80 @@ try:
 except Exception:
     _PYGAME_OK = False
 
-# ── Neural voice catalogue ────────────────────────────────────────────────────
-EDGE_TTS_VOICES = [
-    {"id": "en-US-AriaNeural",    "name": "Aria  — US Female  (Neural)"},
-    {"id": "en-US-JennyNeural",   "name": "Jenny — US Female  (Neural)"},
-    {"id": "en-US-GuyNeural",     "name": "Guy   — US Male    (Neural)"},
-    {"id": "en-US-DavisNeural",   "name": "Davis — US Male    (Neural)"},
-    {"id": "en-GB-SoniaNeural",   "name": "Sonia — UK Female  (Neural)"},
-    {"id": "en-GB-RyanNeural",    "name": "Ryan  — UK Male    (Neural)"},
-    {"id": "en-AU-NatashaNeural", "name": "Natasha — AU Female (Neural)"},
-    {"id": "en-AU-WilliamNeural", "name": "William — AU Male   (Neural)"},
+# ── Neural voice catalogue — organised by language ────────────────────────────
+# Each entry: {"id": "<edge-tts voice id>", "name": "<display name>", "lang": "<iso code>"}
+EDGE_TTS_VOICES_ALL: list[dict] = [
+    # English
+    {"id": "en-US-AriaNeural",      "name": "Aria     — US Female  (Neural)", "lang": "en"},
+    {"id": "en-US-JennyNeural",     "name": "Jenny    — US Female  (Neural)", "lang": "en"},
+    {"id": "en-US-GuyNeural",       "name": "Guy      — US Male    (Neural)", "lang": "en"},
+    {"id": "en-US-DavisNeural",     "name": "Davis    — US Male    (Neural)", "lang": "en"},
+    {"id": "en-GB-SoniaNeural",     "name": "Sonia    — UK Female  (Neural)", "lang": "en"},
+    {"id": "en-GB-RyanNeural",      "name": "Ryan     — UK Male    (Neural)", "lang": "en"},
+    {"id": "en-AU-NatashaNeural",   "name": "Natasha  — AU Female  (Neural)", "lang": "en"},
+    {"id": "en-AU-WilliamNeural",   "name": "William  — AU Male    (Neural)", "lang": "en"},
+    # French
+    {"id": "fr-FR-DeniseNeural",    "name": "Denise   — FR Female  (Neural)", "lang": "fr"},
+    {"id": "fr-FR-HenriNeural",     "name": "Henri    — FR Male    (Neural)", "lang": "fr"},
+    {"id": "fr-CA-SylvieNeural",    "name": "Sylvie   — CA Female  (Neural)", "lang": "fr"},
+    {"id": "fr-CA-JeanNeural",      "name": "Jean     — CA Male    (Neural)", "lang": "fr"},
+    # Khmer
+    {"id": "km-KH-SreymomNeural",   "name": "Sreymom  — KH Female  (Neural)", "lang": "km"},
+    {"id": "km-KH-PisethNeural",    "name": "Piseth   — KH Male    (Neural)", "lang": "km"},
+    # Chinese
+    {"id": "zh-CN-XiaoxiaoNeural",  "name": "Xiaoxiao — CN Female  (Neural)", "lang": "zh"},
+    {"id": "zh-CN-YunxiNeural",     "name": "Yunxi    — CN Male    (Neural)", "lang": "zh"},
+    {"id": "zh-TW-HsiaoChenNeural", "name": "HsiaoChen— TW Female  (Neural)", "lang": "zh"},
+    {"id": "zh-TW-YunJheNeural",    "name": "YunJhe   — TW Male    (Neural)", "lang": "zh"},
+    # Japanese
+    {"id": "ja-JP-NanamiNeural",    "name": "Nanami   — JP Female  (Neural)", "lang": "ja"},
+    {"id": "ja-JP-KeitaNeural",     "name": "Keita    — JP Male    (Neural)", "lang": "ja"},
+    # Korean
+    {"id": "ko-KR-SunHiNeural",     "name": "SunHi    — KR Female  (Neural)", "lang": "ko"},
+    {"id": "ko-KR-InJoonNeural",    "name": "InJoon   — KR Male    (Neural)", "lang": "ko"},
+    # Thai
+    {"id": "th-TH-PremwadeeNeural", "name": "Premwadee— TH Female  (Neural)", "lang": "th"},
+    {"id": "th-TH-NiwatNeural",     "name": "Niwat    — TH Male    (Neural)", "lang": "th"},
+    # Hindi
+    {"id": "hi-IN-SwaraNeural",     "name": "Swara    — IN Female  (Neural)", "lang": "hi"},
+    {"id": "hi-IN-MadhurNeural",    "name": "Madhur   — IN Male    (Neural)", "lang": "hi"},
+    # Arabic
+    {"id": "ar-EG-SalmaNeural",     "name": "Salma    — EG Female  (Neural)", "lang": "ar"},
+    {"id": "ar-EG-ShakirNeural",    "name": "Shakir   — EG Male    (Neural)", "lang": "ar"},
+    {"id": "ar-SA-ZariyahNeural",   "name": "Zariyah  — SA Female  (Neural)", "lang": "ar"},
+    {"id": "ar-SA-HamedNeural",     "name": "Hamed    — SA Male    (Neural)", "lang": "ar"},
+    # German
+    {"id": "de-DE-KatjaNeural",     "name": "Katja    — DE Female  (Neural)", "lang": "de"},
+    {"id": "de-DE-ConradNeural",    "name": "Conrad   — DE Male    (Neural)", "lang": "de"},
+    # Spanish
+    {"id": "es-ES-ElviraNeural",    "name": "Elvira   — ES Female  (Neural)", "lang": "es"},
+    {"id": "es-ES-AlvaroNeural",    "name": "Alvaro   — ES Male    (Neural)", "lang": "es"},
+    {"id": "es-MX-DaliaNeural",     "name": "Dalia    — MX Female  (Neural)", "lang": "es"},
+    {"id": "es-MX-JorgeNeural",     "name": "Jorge    — MX Male    (Neural)", "lang": "es"},
+    # Portuguese
+    {"id": "pt-BR-FranciscaNeural", "name": "Francisca— BR Female  (Neural)", "lang": "pt"},
+    {"id": "pt-BR-AntonioNeural",   "name": "Antonio  — BR Male    (Neural)", "lang": "pt"},
+    {"id": "pt-PT-RaquelNeural",    "name": "Raquel   — PT Female  (Neural)", "lang": "pt"},
+    {"id": "pt-PT-DuarteNeural",    "name": "Duarte   — PT Male    (Neural)", "lang": "pt"},
+    # Russian
+    {"id": "ru-RU-SvetlanaNeural",  "name": "Svetlana — RU Female  (Neural)", "lang": "ru"},
+    {"id": "ru-RU-DmitryNeural",    "name": "Dmitry   — RU Male    (Neural)", "lang": "ru"},
+    # Vietnamese
+    {"id": "vi-VN-HoaiMyNeural",    "name": "HoaiMy   — VN Female  (Neural)", "lang": "vi"},
+    {"id": "vi-VN-NamMinhNeural",   "name": "NamMinh  — VN Male    (Neural)", "lang": "vi"},
+    # Indonesian
+    {"id": "id-ID-GadisNeural",     "name": "Gadis    — ID Female  (Neural)", "lang": "id"},
+    {"id": "id-ID-ArdiNeural",      "name": "Ardi     — ID Male    (Neural)", "lang": "id"},
 ]
+
+# Legacy alias — keeps any code that imports EDGE_TTS_VOICES working
+EDGE_TTS_VOICES = [v for v in EDGE_TTS_VOICES_ALL if v["lang"] == "en"]
+
+
+def get_voices_for_lang(lang: str) -> list[dict]:
+    """Return Edge-TTS voices for the given ISO 639-1 language code."""
+    matched = [v for v in EDGE_TTS_VOICES_ALL if v["lang"] == lang]
+    return matched if matched else EDGE_TTS_VOICES   # fall back to English
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,15 +182,13 @@ class EdgeTTSWorker(QThread):
         self._stop_event  = threading.Event()
         self._pause_event = threading.Event()   # set = paused
         self._sentence_mp3s: list[str] = []     # ordered sentence files for combine
-        self._word_idx: int = 0                 # Fix #3: pointer for word-highlight scan
+        self._word_idx: int = 0                 # pointer for word-highlight scan
 
     # ── Main thread body ──────────────────────────────────────────────────────
 
     def run(self):
         sentences  = _split_sentences(self._text)
 
-        # Fix #1 — large text queue limit: cap sentences to prevent hundreds of
-        # back-to-back EdgeTTS requests from a very large paste.
         if len(sentences) > MAX_SENTENCE_QUEUE:
             self.error_occurred.emit(
                 f"Warning: Text too long ({len(sentences)} sentences). "
@@ -137,8 +198,6 @@ class EdgeTTSWorker(QThread):
 
         tmp_files: list[str] = []
 
-        # Pre-compute where each sentence starts in the original text so that
-        # WordBoundary char offsets can be mapped back to the full document.
         char_offsets: list[int] = []
         search_pos = 0
         for s in sentences:
@@ -158,16 +217,12 @@ class EdgeTTSWorker(QThread):
 
                     tmp_path, boundaries = next_future.result()
 
-                    # Pre-fetch next sentence while this one plays
                     if i + 1 < len(sentences) and not self._stop_event.is_set():
                         next_future = pool.submit(self._synthesise, sentences[i + 1])
 
                     if tmp_path is None or self._stop_event.is_set():
                         break
 
-                    # Guard: skip empty audio files (can happen with non-Latin
-                    # text that slips through the language filter — prevents
-                    # pygame from crashing on a zero-byte MP3).
                     try:
                         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 64:
                             continue
@@ -180,7 +235,7 @@ class EdgeTTSWorker(QThread):
                     if i == 0:
                         self.started_speaking.emit()
 
-                    self._word_idx = 0  # Fix #3: reset pointer for each new sentence
+                    self._word_idx = 0
 
                     try:
                         pygame.mixer.music.load(tmp_path)
@@ -192,7 +247,6 @@ class EdgeTTSWorker(QThread):
 
                     sentence_char_offset = char_offsets[i]
 
-                    # ── Playback loop — handles stop, pause, and word highlight ──
                     while pygame.mixer.music.get_busy():
                         if self._stop_event.is_set():
                             pygame.mixer.music.stop()
@@ -201,20 +255,17 @@ class EdgeTTSWorker(QThread):
                         if self._pause_event.is_set():
                             pygame.mixer.music.pause()
                             self.paused_speaking.emit()
-                            # Wait until unpaused or stopped
                             while self._pause_event.is_set():
                                 if self._stop_event.is_set():
                                     pygame.mixer.music.stop()
                                     break
                                 self.msleep(40)
                             else:
-                                # Unpaused cleanly → resume
                                 pygame.mixer.music.unpause()
                                 self.resumed_speaking.emit()
                             if self._stop_event.is_set():
                                 break
 
-                        # Emit word highlight based on current playback position
                         if boundaries:
                             pos_ms = pygame.mixer.music.get_pos()
                             if pos_ms >= 0:
@@ -223,7 +274,6 @@ class EdgeTTSWorker(QThread):
                                 )
 
                         self.msleep(40)
-                    # ────────────────────────────────────────────────────────
 
                     try:
                         pygame.mixer.music.unload()
@@ -236,19 +286,14 @@ class EdgeTTSWorker(QThread):
         except Exception as exc:
             self.error_occurred.emit(str(exc))
         finally:
-            # Unload pygame FIRST so it releases all file handles.
-            # On Windows, os.remove() fails on open files (PermissionError),
-            # so we must ensure pygame is done before touching the temp files.
             try:
                 pygame.mixer.music.unload()
             except Exception:
                 pass
 
-            # Save combined session MP3 (even partial sessions are useful)
             if self._session_path and self._sentence_mp3s:
                 self._combine_mp3s(self._sentence_mp3s, self._session_path)
 
-            # Clean up sentence temp files (safe now — pygame handles released)
             for f in tmp_files:
                 try:
                     if os.path.exists(f):
@@ -256,9 +301,6 @@ class EdgeTTSWorker(QThread):
                 except Exception:
                     pass
 
-            # Guard: do not emit signals after Qt has started tearing down
-            # the object graph (e.g. on app exit). Emitting during destruction
-            # can cause segfaults on some platforms.
             if not self.isInterruptionRequested():
                 self.finished_speaking.emit()
 
@@ -266,20 +308,11 @@ class EdgeTTSWorker(QThread):
 
     def _emit_word_highlight(self, boundaries: list[dict],
                              sentence_offset: int, pos_ms: int):
-        """Find the word at pos_ms and emit word_highlight(char_start, char_end).
-
-        Fix #3: Uses a persistent forward-only index pointer (_word_idx) instead
-        of scanning from the beginning on every 40 ms tick.  Since pos_ms only
-        increases during normal playback, we just advance the pointer until the
-        next word hasn't started yet — O(1) amortised per call.
-        """
         if not boundaries:
             return
-        # Advance pointer while the *next* word has already started.
         while (self._word_idx + 1 < len(boundaries) and
                boundaries[self._word_idx + 1]["offset_ms"] <= pos_ms):
             self._word_idx += 1
-        # Only emit if the current word has actually started (guard first tick).
         wb = boundaries[self._word_idx]
         if wb["offset_ms"] <= pos_ms:
             start = sentence_offset + wb["text_offset"]
@@ -289,13 +322,6 @@ class EdgeTTSWorker(QThread):
     # ── Per-sentence synthesis (pool thread) ──────────────────────────────────
 
     def _synthesise(self, sentence: str) -> tuple[str | None, list[dict]]:
-        """
-        Synthesise one sentence.
-        Returns (mp3_path, word_boundaries) where word_boundaries is a list of:
-          {"offset_ms": int, "duration_ms": int,
-           "text": str, "text_offset": int, "word_length": int}
-        offset_ms / duration_ms are milliseconds from start of sentence audio.
-        """
         try:
             import edge_tts
         except ImportError:
@@ -313,7 +339,6 @@ class EdgeTTSWorker(QThread):
             communicate = edge_tts.Communicate(sentence, self._voice, rate=self._rate)
             audio = bytearray()
             async for event in communicate.stream():
-                # Safety cap: prevent runaway memory growth from a corrupt stream
                 if len(audio) > MAX_SENTENCE_AUDIO_BYTES:
                     raise RuntimeError(
                         f"Audio buffer exceeded {MAX_SENTENCE_AUDIO_BYTES // 1024} KB "
@@ -332,14 +357,11 @@ class EdgeTTSWorker(QThread):
             with open(tmp.name, "wb") as fout:
                 fout.write(bytes(audio))
 
-        # Fix #2 — retry with exponential backoff on TimeoutError.
         import time as _time
         delay = EDGE_TTS_RETRY_DELAY_S
         for attempt in range(1, EDGE_TTS_MAX_RETRIES + 1):
             word_boundaries.clear()
             try:
-                # EDGE_TTS_TIMEOUT_S is applied per sentence. If the network hangs,
-                # asyncio.wait_for raises TimeoutError instead of blocking forever.
                 asyncio.run(
                     asyncio.wait_for(_gen(), timeout=EDGE_TTS_TIMEOUT_S)
                 )
@@ -347,7 +369,7 @@ class EdgeTTSWorker(QThread):
             except asyncio.TimeoutError:
                 if attempt < EDGE_TTS_MAX_RETRIES:
                     _time.sleep(delay)
-                    delay *= 2          # exponential backoff
+                    delay *= 2
                     continue
                 self.error_occurred.emit(
                     f"EdgeTTS timed out after {EDGE_TTS_MAX_RETRIES} attempts "
@@ -355,7 +377,7 @@ class EdgeTTSWorker(QThread):
                 )
             except Exception as exc:
                 self.error_occurred.emit(f"EdgeTTS error: {exc}")
-                break   # non-timeout errors are not retried
+                break
         try:
             os.remove(tmp.name)
         except Exception:
@@ -365,35 +387,27 @@ class EdgeTTSWorker(QThread):
     # ── Combine sentence MP3s into one session file ───────────────────────────
 
     def _combine_mp3s(self, sources: list[str], dest: str):
-        """
-        Concatenate CBR MP3 segments by binary append.
-        edge-tts always outputs CBR MP3, so frame boundaries are clean.
-        No external tools (ffmpeg / pydub) required.
-        """
         try:
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             with open(dest, "wb") as out:
                 for src in sources:
                     if os.path.exists(src):
                         with open(src, "rb") as f:
-                            shutil.copyfileobj(f, out)  # chunked — avoids loading full MP3 into RAM
+                            shutil.copyfileobj(f, out)
         except Exception as exc:
             self.error_occurred.emit(f"Audio save error: {exc}")
 
     # ── Control (called from main thread) ─────────────────────────────────────
 
     def pause(self):
-        """Signal the playback loop to pause at the current position."""
         self._pause_event.set()
 
     def resume(self):
-        """Signal the playback loop to resume from the paused position."""
         self._pause_event.clear()
 
     def stop(self):
-        """Terminate playback immediately."""
         self._stop_event.set()
-        self._pause_event.clear()   # unblock the inner pause wait
+        self._pause_event.clear()
         try:
             pygame.mixer.music.stop()
         except Exception:
@@ -408,19 +422,12 @@ class EdgeTTSWorker(QThread):
 class Pyttsx3Worker(QThread):
     """
     Offline TTS via system SAPI5 / espeak. Pause is not supported.
-
-    Large-text safety
-    -----------------
-    Text is split into sentences before synthesis. SAPI5 (Windows) and
-    espeak-ng (Linux) have internal buffer limits (~32 KB). Passing a 100 KB
-    string in a single `engine.say()` call causes buffer overflow, garbled
-    audio, or a silent freeze. Sentence-level iteration avoids this entirely.
     """
 
     preparing_speech  = pyqtSignal()
     started_speaking  = pyqtSignal()
-    paused_speaking   = pyqtSignal()   # never emitted — here for interface parity
-    resumed_speaking  = pyqtSignal()   # never emitted
+    paused_speaking   = pyqtSignal()
+    resumed_speaking  = pyqtSignal()
     finished_speaking = pyqtSignal()
     error_occurred    = pyqtSignal(str)
 
@@ -432,7 +439,7 @@ class Pyttsx3Worker(QThread):
         self._volume        = volume
         self._voice_id      = voice_id
         self._engine: pyttsx3.Engine | None = None
-        self._stop_requested = False   # checked between sentences
+        self._stop_requested = False
 
     def run(self):
         try:
@@ -445,11 +452,8 @@ class Pyttsx3Worker(QThread):
                 engine.setProperty("voice", self._voice_id)
             self.started_speaking.emit()
 
-            # Split into sentences so we never pass a massive string to SAPI5 /
-            # espeak in one call. Also allows stop() to take effect between chunks.
             chunks = _split_sentences(self._text)
 
-            # Fix #1 — large text queue limit (offline mode).
             if len(chunks) > MAX_SENTENCE_QUEUE:
                 self.error_occurred.emit(
                     f"Warning: Text too long ({len(chunks)} sentences). "
@@ -461,7 +465,7 @@ class Pyttsx3Worker(QThread):
                 if self._stop_requested:
                     break
                 engine.say(chunk)
-                engine.runAndWait()   # blocks until this sentence is spoken
+                engine.runAndWait()
 
         except Exception as exc:
             self.error_occurred.emit(str(exc))
@@ -472,12 +476,11 @@ class Pyttsx3Worker(QThread):
             except Exception:
                 pass
             self._engine = None
-            # Guard: do not emit signals during Qt object destruction
             if not self.isInterruptionRequested():
                 self.finished_speaking.emit()
 
     def pause(self):
-        pass   # SAPI5 has no reliable pause API
+        pass
 
     def resume(self):
         pass
@@ -486,12 +489,12 @@ class Pyttsx3Worker(QThread):
         self._stop_requested = True
         try:
             if self._engine:
-                self._engine.stop()   # interrupts engine.runAndWait()
+                self._engine.stop()
         except Exception:
             pass
         self.requestInterruption()
-        if not self.wait(1500):       # give the thread time to exit cleanly
-            self.terminate()          # last resort — only if still alive after 1.5s
+        if not self.wait(1500):
+            self.terminate()
             self.wait(500)
 
 
@@ -512,7 +515,8 @@ class TTSEngine:
         self._edge_voice    = "en-US-AriaNeural"
         self._edge_rate     = "+0%"
         self._volume        = 1.0
-        self._force_offline = False   # user can override to force pyttsx3
+        self._force_offline = False
+        self._active_lang   = "en"   # currently selected language ISO code
 
         # pyttsx3 fallback settings
         self._rate        = 175
@@ -520,7 +524,7 @@ class TTSEngine:
         self._pyttsx3_voices: list[dict] = []
 
         self._edge_available = self._check_edge_tts()
-        self._load_pyttsx3_voices()   # always load so offline mode has voices
+        self._load_pyttsx3_voices()
 
     # ── Backend detection ─────────────────────────────────────────────────────
 
@@ -536,16 +540,28 @@ class TTSEngine:
         return self._edge_available
 
     def _use_edge(self) -> bool:
-        """True when EdgeTTS is available AND not forced offline."""
         return self._edge_available and not self._force_offline
 
     def set_forced_offline(self, offline: bool):
-        """Force pyttsx3 even if edge-tts is installed (user preference)."""
         self._force_offline = offline
 
     def supports_pause(self) -> bool:
-        """True only when EdgeTTS backend is active."""
         return self._use_edge()
+
+    # ── Language selection ────────────────────────────────────────────────────
+
+    def set_language(self, lang: str) -> None:
+        """
+        Switch the active language. Resets the voice to the first native
+        speaker available for that language.
+        """
+        self._active_lang = lang
+        voices = self.get_voices()
+        if voices:
+            self._edge_voice = voices[0]["id"]
+
+    def get_active_language(self) -> str:
+        return self._active_lang
 
     # ── Voice discovery ───────────────────────────────────────────────────────
 
@@ -559,7 +575,10 @@ class TTSEngine:
             self._pyttsx3_voices = []
 
     def get_voices(self) -> list[dict]:
-        return EDGE_TTS_VOICES if self._use_edge() else self._pyttsx3_voices
+        """Return voices for the currently selected language (Edge) or all system voices (offline)."""
+        if self._use_edge():
+            return get_voices_for_lang(self._active_lang)
+        return self._pyttsx3_voices
 
     # ── Playback ──────────────────────────────────────────────────────────────
 
@@ -621,7 +640,7 @@ class TTSEngine:
     def set_voice(self, voice_id: str | None):
         if self._edge_available:
             if voice_id:
-                valid_ids = {v["id"] for v in EDGE_TTS_VOICES}
+                valid_ids = {v["id"] for v in EDGE_TTS_VOICES_ALL}
                 if voice_id in valid_ids:
                     self._edge_voice = voice_id
                 else:
