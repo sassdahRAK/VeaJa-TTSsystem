@@ -78,86 +78,6 @@ class SettingsMixin:
         sc_lay.setContentsMargins(32, 0, 32, 24)
         sc_lay.setSpacing(14)
 
-        # ── Shape ─────────────────────────────────────────────────────────
-        shape_lbl = QLabel("Set overlay shape")
-        shape_lbl.setObjectName("shapeSectionLabel")
-        sc_lay.addWidget(shape_lbl)
-
-        shape_box = QWidget()
-        shape_box.setObjectName("shapeBox")
-        sb_lay = QVBoxLayout(shape_box)
-        sb_lay.setContentsMargins(16, 8, 16, 40)
-        sb_lay.setSpacing(0)
-
-        # Edit icon top-right — floated, doesn't affect vertical rhythm
-        edit_row = QHBoxLayout()
-        edit_row.setContentsMargins(0, 0, 0, 0)
-        edit_row.addStretch()
-        shape_edit_ic = self._inline_edit_icon()
-        shape_edit_ic.setObjectName("shapeEditIcon")
-        shape_edit_ic.setFixedSize(16, 16)
-        edit_row.addWidget(shape_edit_ic)
-        sb_lay.addLayout(edit_row)
-
-        # Circle row — negative spacing pulls it up tight under edit icon
-        circle_row = self._shape_row("Circle", is_circle=True, checked=True)
-        self._shape_circle = circle_row[0]
-        sb_lay.addWidget(circle_row[1])
-
-        sb_lay.addSpacing(20)   # gap between Circle and Rectangle rows
-
-        # Rectangle row
-        rect_row = self._shape_row("Rectangle", is_circle=False, checked=False)
-        self._shape_rect = rect_row[0]
-        sb_lay.addWidget(rect_row[1])
-
-        # Mutually exclusive
-        self._shape_circle.toggled.connect(
-            lambda c: self._shape_rect.setChecked(not c) if c else None
-        )
-        self._shape_rect.toggled.connect(
-            lambda c: self._shape_circle.setChecked(not c) if c else None
-        )
-
-        # Keep dashboard pill SVG in sync with shape setting
-        self._shape_circle.toggled.connect(lambda _: self._update_dashboard_pill_icon())
-        QTimer.singleShot(0, self._update_dashboard_pill_icon)   # apply on first load
-
-        # Notify AppController → overlay whenever the shape changes
-        self._shape_circle.toggled.connect(
-            lambda c: self.shape_changed.emit("circle" if c else "rectangle")
-        )
-
-        sc_lay.addWidget(shape_box)
-
-        # ── Animation Overlay ─────────────────────────────────────────────
-        anim_lbl = QLabel("Animation Overlay")
-        anim_lbl.setObjectName("shapeSectionLabel")
-        sc_lay.addWidget(anim_lbl)
-
-        anim_box = QWidget()
-        anim_box.setObjectName("shapeBox")
-        ab_lay = QVBoxLayout(anim_box)
-        ab_lay.setContentsMargins(16, 12, 16, 16)
-        ab_lay.setSpacing(10)
-
-        self._anim_spin_chk = QCheckBox("Logo spin while reading")
-        self._anim_spin_chk.setObjectName("settingsCheck")
-        self._anim_spin_chk.setToolTip("Rotates the Veaja logo while speech is playing")
-        self._anim_spin_chk.toggled.connect(lambda c: self.anim_spin_changed.emit(c))
-        ab_lay.addWidget(self._anim_spin_chk)
-
-        self._anim_glow_chk = QCheckBox("Glow border pulse (voice timing)")
-        self._anim_glow_chk.setObjectName("settingsCheck")
-        self._anim_glow_chk.setToolTip(
-            "Pulses a coloured glow around the logo in sync with each spoken word.\n"
-            "Blue in light mode · Orange in dark mode."
-        )
-        self._anim_glow_chk.toggled.connect(lambda c: self.anim_glow_changed.emit(c))
-        ab_lay.addWidget(self._anim_glow_chk)
-
-        sc_lay.addWidget(anim_box)
-
         # ── Mode + Language ───────────────────────────────────────────────
         ml_row = QHBoxLayout()
         ml_row.setSpacing(0)
@@ -429,36 +349,22 @@ class SettingsMixin:
     def _save_settings(self):
         """Collect the current control state, persist via signal, go to dashboard."""
         settings = {
-            "speed":             self._speed_slider.value(),
-            "overlay_shape":     "circle" if self._shape_circle.isChecked() else "rectangle",
-            "voice_index":       self._sound_input.currentIndex(),
-            "volume":            self._vol_slider.value() / 100.0,
-            "overlay_anim_spin": self._anim_spin_chk.isChecked(),
-            "overlay_anim_glow": self._anim_glow_chk.isChecked(),
+            "speed":       self._speed_slider.value(),
+            "voice_index": self._sound_input.currentIndex(),
+            "volume":      self._vol_slider.value() / 100.0,
         }
         self.settings_save_requested.emit(settings)
-        self._navigate(0)   # return to dashboard
+        self._navigate(0)
 
     # ── Reset ─────────────────────────────────────────────────────────────────
 
     def _reset_settings(self):
         """Restore every Voice Setting control to its default value."""
 
-        # 1. Overlay shape → Rectangle (default)
-        self._shape_rect.blockSignals(True)
-        self._shape_circle.blockSignals(True)
-        self._shape_rect.setChecked(True)
-        self._shape_circle.setChecked(False)
-        self._shape_rect.blockSignals(False)
-        self._shape_circle.blockSignals(False)
-        # Notify overlay and dashboard pill
-        self.shape_changed.emit("rectangle")
-        self._update_dashboard_pill_icon()
+        # 1. Speed → 175
+        self._speed_slider.setValue(175)
 
-        # 2. Speed → 175
-        self._speed_slider.setValue(175)   # triggers _on_speed_changed → tts.set_rate
-
-        # 3. Mode → online if internet available, else offline
+        # 2. Mode → online if internet available, else offline
         is_online = getattr(self, "_net_is_online", True) and \
                     self._tts is not None and self._tts.is_edge_available()
         self._online_btn.blockSignals(True)
@@ -469,10 +375,10 @@ class SettingsMixin:
         self._offline_btn.blockSignals(False)
         self.mode_changed.emit(is_online)
 
-        # 4. Language → English (index 0)
+        # 3. Language → English (index 0)
         self._lang_combo.setCurrentIndex(0)
 
-        # 5. Voice / Sound → first available voice
+        # 4. Voice / Sound → first available voice
         self._sound_input.blockSignals(True)
         self._voice_combo.blockSignals(True)
         self._sound_input.setCurrentIndex(0)
@@ -482,12 +388,8 @@ class SettingsMixin:
         if self._tts and self._sound_input.count() > 0:
             self._tts.set_voice(self._sound_input.itemData(0))
 
-        # 6. Volume → 100 %
-        self._vol_slider.setValue(100)     # triggers _on_volume_changed → tts.set_volume
-
-        # 7. Animation overlay → spin on, glow off (defaults)
-        self._anim_spin_chk.setChecked(True)
-        self._anim_glow_chk.setChecked(False)
+        # 5. Volume → 100 %
+        self._vol_slider.setValue(100)
 
     def _update_settings_reset_icon(self):
         """Refresh the reset button icon to match the current theme."""

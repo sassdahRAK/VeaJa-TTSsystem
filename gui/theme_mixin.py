@@ -45,6 +45,7 @@ class ThemeMixin:
         self._apply_titlebar_theme()
         # Settings page reset icon (theme-sensitive SVG)
         self._update_settings_reset_icon()
+        self._update_overlay_reset_icon()
 
     def _apply_sidebar_theme(self):
         if self._sidebar_widget is None:

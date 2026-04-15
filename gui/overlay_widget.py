@@ -99,6 +99,7 @@ PILL_HEIGHT = CIRCLE_SIZE                       # height stays constant
 PILL_WIDTH  = CIRCLE_SIZE + TEXT_WIDTH + PADDING  # expanded width
 ANIM_MS     = 220                               # animation duration ms
 DRAG_PX     = 6                                 # drag-detection threshold
+GLOW_MARGIN = 0
 
 # How often (ms) to re-assert the window level while the overlay is visible.
 # This catches edge cases where macOS re-orders windows after focus changes.
@@ -291,9 +292,7 @@ class OverlayWidget(QWidget):
         self._dark: bool  = _is_dark_mode()
         self._shape: str  = "circle"   # "circle" | "rectangle"
         self._anim_spin: bool   = False
-        self._anim_glow: bool   = False
         self._spin_angle: float = 0.0
-        self._glow_intensity: float = 0.0
 
         self._setup_window()
         self._build_ui()
@@ -431,11 +430,6 @@ class OverlayWidget(QWidget):
         self._spin_timer.setInterval(16)
         self._spin_timer.timeout.connect(self._tick_spin)
 
-        # Glow timer — fades glow intensity down after each word pulse
-        self._glow_timer = QTimer(self)
-        self._glow_timer.setInterval(30)
-        self._glow_timer.timeout.connect(self._tick_glow)
-
     # ------------------------------------------------------------------ #
     # Spin helpers
     # ------------------------------------------------------------------ #
@@ -443,20 +437,6 @@ class OverlayWidget(QWidget):
     def _tick_spin(self) -> None:
         self._spin_angle = (self._spin_angle + 1.33) % 360.0
         self._logo.update()
-
-    # ------------------------------------------------------------------ #
-    # Glow helpers
-    # ------------------------------------------------------------------ #
-
-    def _tick_glow(self) -> None:
-        self._glow_intensity = max(0.0, self._glow_intensity - 0.025)
-        self._apply_glow_effect()
-        if self._glow_intensity <= 0:
-            self._glow_timer.stop()
-
-    def _apply_glow_effect(self) -> None:
-        # Trigger a repaint — the glow is drawn in paintEvent
-        self.update()
 
     # ------------------------------------------------------------------ #
     # Public animation controls
@@ -469,14 +449,6 @@ class OverlayWidget(QWidget):
             self._spin_timer.stop()
             self._spin_angle = 0.0
             self._logo.update()
-
-    def set_anim_glow(self, enabled: bool) -> None:
-        """Enable or disable the glow-border-on-word animation."""
-        self._anim_glow = enabled
-        if not enabled:
-            self._glow_timer.stop()
-            self._glow_intensity = 0.0
-            self.update()
 
     def _on_anim_value(self, value: int):
         self._text_panel.setMaximumWidth(value)
@@ -643,11 +615,6 @@ class OverlayWidget(QWidget):
             self._spin_timer.stop()
             self._spin_angle = 0.0
             self._logo.update()
-            # Fade out glow
-            if self._anim_glow:
-                self._glow_intensity = 0.0
-                self._apply_glow_effect()
-                self._glow_timer.stop()
         self.update()
 
     def set_current_word(self, char_start: int, char_end: int):
@@ -659,13 +626,6 @@ class OverlayWidget(QWidget):
         """
         if not self._speaking or not self._text:
             return
-
-        # Glow pulse — spike intensity on each new word
-        if self._anim_glow:
-            self._glow_intensity = 1.0
-            self._apply_glow_effect()
-            if not self._glow_timer.isActive():
-                self._glow_timer.start()
 
         import html as _html
 
@@ -726,20 +686,11 @@ class OverlayWidget(QWidget):
             self._logo.reset_to_default(self._dark)
 
     def show_near(self, screen_x: int, screen_y: int):
-        """
-        Show the overlay pill near the given screen coordinates.
-        Places the overlay to the LEFT of the cursor, centered vertically —
-        approximating the left edge of the selected text block at mid-height.
-        Clamps to screen bounds so it never goes off-screen.
-        """
         screen = QApplication.primaryScreen().availableGeometry()
-        # Place to the left of the cursor, vertically centred on it
         x = screen_x - self.width() - 20
         y = screen_y - self.height() // 2
-        # If not enough room on the left, fall back to the right
         if x < screen.left() + 10:
             x = screen_x + 20
-        # Clamp to screen bounds
         x = min(x, screen.right()  - self.width()  - 10)
         y = max(y, screen.top()    + 10)
         y = min(y, screen.bottom() - self.height() - 10)
@@ -772,9 +723,6 @@ class OverlayWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Use stored _dark flag — never call _is_dark_mode() here because
-        # Qt may misread the Windows 11 dark mode palette, causing every
-        # repaint to flip the pill colour incorrectly.
         bg     = QColor(38, 38, 40, 245) if self._dark else QColor(255, 255, 255, 240)
         border = QColor(70, 70, 75, 200) if self._dark else QColor(210, 210, 215, 200)
 
@@ -784,29 +732,6 @@ class OverlayWidget(QWidget):
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1.0))
         painter.drawRoundedRect(rect, radius, radius)
-
-        # Glow border — large soft concentric rings expanding outward from the pill
-        if self._anim_glow and self._glow_intensity > 0:
-            glow_base = QColor("#FF9500") if self._dark else QColor("#0A84FF")
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            # Each pass expands the rect outward by `expand` px so glow bleeds outside
-            for expand, pen_w, alpha_scale in (
-                (12.0, 18.0, 0.08),
-                ( 8.0, 12.0, 0.18),
-                ( 5.0,  8.0, 0.35),
-                ( 2.5,  5.0, 0.60),
-                ( 0.5,  2.5, 0.90),
-            ):
-                c = QColor(glow_base)
-                c.setAlpha(int(self._glow_intensity * 255 * alpha_scale))
-                painter.setPen(QPen(c, pen_w))
-                gr = QRectF(
-                    rect.x()      - expand,
-                    rect.y()      - expand,
-                    rect.width()  + expand * 2,
-                    rect.height() + expand * 2,
-                )
-                painter.drawRoundedRect(gr, radius + expand, radius + expand)
 
     # ------------------------------------------------------------------ #
     # Label double-click → free-drag mode

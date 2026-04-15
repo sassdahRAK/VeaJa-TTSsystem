@@ -14,7 +14,7 @@ PROFILE_PATH = PROFILE_DIR / "profile.json"
 
 # Fix #5: bump this when adding new required fields so _migrate() can upgrade
 # old profiles automatically without the user losing their settings.
-CURRENT_PROFILE_VERSION = 2
+CURRENT_PROFILE_VERSION = 3
 
 DEFAULT_PROFILE: dict = {
     "version":         1,
@@ -28,10 +28,17 @@ DEFAULT_PROFILE: dict = {
     "speed":           175,          # TTS rate, range 50–400
     "overlay_shape":     "rectangle",  # "circle" | "rectangle"
     "overlay_anim_spin": True,         # spin logo while reading
-    "overlay_anim_glow": False,        # glow border pulse with word timing
     "voice_index":       0,            # index into the current voice list
     "volume":          1.0,          # 0.0–1.0
-    "tab_order":       [0, 1, 2, 3], # dashboard tab display order (canonical indices)
+    "tab_order":       [0, 1, 2, 3, 4, 5], # dashboard tab display order
+    "nav_order":       [1, 7, 8, 2],  # sidebar nav display order (page indices)
+    # API keys (stored locally, never transmitted except to the chosen provider)
+    "api_key_openai":          "",
+    "api_key_gemini":          "",
+    "api_key_claude":          "",
+    "api_key_aistudio":        "",
+    "api_key_deepl":           "",
+    "api_key_libretranslate":  "",
 }
 
 
@@ -110,6 +117,10 @@ class ProfileManager(QObject):
         if v < CURRENT_PROFILE_VERSION:
             # v0 → v1: no structural changes
             # v1 → v2: add tab_order field
-            data.setdefault("tab_order", [0, 1, 2, 3])
+            data.setdefault("tab_order", [0, 1, 2, 3, 4, 5])
+            data.setdefault("nav_order", [1, 7, 8, 2])
+            for k in ("api_key_openai", "api_key_gemini", "api_key_claude",
+                      "api_key_aistudio", "api_key_deepl", "api_key_libretranslate"):
+                data.setdefault(k, "")
             data["version"] = CURRENT_PROFILE_VERSION
         return data

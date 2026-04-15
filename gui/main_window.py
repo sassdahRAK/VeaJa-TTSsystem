@@ -90,16 +90,19 @@ class _DragBar(QWidget):
 
 
 # ── Mixin imports ──
-from gui.pages.dashboard_mixin import DashboardMixin    # noqa: E402
-from gui.pages.settings_mixin import SettingsMixin      # noqa: E402
-from gui.pages.history_mixin import HistoryMixin        # noqa: E402
-from gui.pages.profile_mixin import ProfileMixin        # noqa: E402
-from gui.pages.info_pages_mixin import InfoPagesMixin   # noqa: E402
-from gui.theme_mixin import ThemeMixin                  # noqa: E402
+from gui.pages.dashboard_mixin import DashboardMixin                    # noqa: E402
+from gui.pages.settings_mixin import SettingsMixin                      # noqa: E402
+from gui.pages.overlay_settings_mixin import OverlaySettingsMixin       # noqa: E402
+from gui.pages.api_keys_mixin import ApiKeysMixin                        # noqa: E402
+from gui.pages.history_mixin import HistoryMixin                        # noqa: E402
+from gui.pages.profile_mixin import ProfileMixin                        # noqa: E402
+from gui.pages.info_pages_mixin import InfoPagesMixin                   # noqa: E402
+from gui.theme_mixin import ThemeMixin                                  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
+class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
+                 ApiKeysMixin, HistoryMixin, ProfileMixin,
                  InfoPagesMixin, ThemeMixin, QMainWindow):
 
     # ── Signals ────────────────────────────────────────────────────────────────
@@ -116,7 +119,6 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     mode_changed           = pyqtSignal(bool)   # True = online
     shape_changed         = pyqtSignal(str)    # "circle" | "rectangle"
     anim_spin_changed     = pyqtSignal(bool)   # logo spin while reading
-    anim_glow_changed     = pyqtSignal(bool)   # glow border pulse
     tour_requested        = pyqtSignal()
     lang_changed          = pyqtSignal(str)    # "en" | "fr"
 
@@ -182,16 +184,18 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         self._sidebar_widget = self._build_sidebar()
         row_lay.addWidget(self._sidebar_widget)
 
-        # Content stack (pages 0-6)
+        # Content stack (pages 0-7)
         self._content_stack = QStackedWidget()
         self._content_stack.setObjectName("contentStack")
-        self._content_stack.addWidget(self._build_dashboard_page())  # 0
-        self._content_stack.addWidget(self._build_settings_page())   # 1
-        self._content_stack.addWidget(self._build_history_page())    # 2
-        self._content_stack.addWidget(self._build_ask_page())        # 3
-        self._content_stack.addWidget(self._build_privacy_page())    # 4
-        self._content_stack.addWidget(self._build_tutorial_page())   # 5
-        self._content_stack.addWidget(self._build_profile_page())    # 6
+        self._content_stack.addWidget(self._build_dashboard_page())          # 0
+        self._content_stack.addWidget(self._build_settings_page())           # 1
+        self._content_stack.addWidget(self._build_history_page())            # 2
+        self._content_stack.addWidget(self._build_ask_page())                # 3
+        self._content_stack.addWidget(self._build_privacy_page())            # 4
+        self._content_stack.addWidget(self._build_tutorial_page())           # 5
+        self._content_stack.addWidget(self._build_profile_page())            # 6
+        self._content_stack.addWidget(self._build_overlay_settings_page())   # 7
+        self._content_stack.addWidget(self._build_api_keys_page())           # 8
         row_lay.addWidget(self._content_stack, 1)
 
         root.addWidget(content_row, 1)
@@ -379,12 +383,9 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         outer.addWidget(self._dash_btn)
         outer.addSpacing(18)
 
-        # ── Nav links ─────────────────────────────────────────────────────
-        nav_col = QVBoxLayout()
-        nav_col.setSpacing(10)
-        nav_col.addWidget(self._nav_link("Voice Setting", 1))
-        nav_col.addWidget(self._nav_link("View History",  2))
-        outer.addLayout(nav_col)
+        # ── Draggable nav links ───────────────────────────────────────────
+        self._sidebar_nav = _DraggableSidebarNav(self)
+        outer.addWidget(self._sidebar_nav)
 
         # Push help section toward bottom but cap so it never creates a huge gap
         outer.addSpacing(24)
@@ -430,9 +431,27 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         self._content_stack.setCurrentIndex(page_idx)
         for btn, idx in self._nav_btns:
             btn.setChecked(idx == page_idx)
+        if hasattr(self, "_sidebar_nav"):
+            self._sidebar_nav.set_active(page_idx)
         # Show edit icon only when NOT on the profile page (index 6)
         if self._edit_icon_lbl is not None:
             self._edit_icon_lbl.setVisible(page_idx != 6)
+        # Re-show and re-arm the title fade every time Dashboard is opened
+        if page_idx == 0:
+            self._restart_dashboard_title_fade()
+
+    def apply_nav_order(self, order: list):
+        if hasattr(self, "_sidebar_nav"):
+            self._sidebar_nav.apply_order(order)
+
+    def get_nav_order(self) -> list:
+        if hasattr(self, "_sidebar_nav"):
+            return self._sidebar_nav.current_order()
+        return [1, 7, 2]
+
+    def _on_nav_order_changed(self):
+        order = self.get_nav_order()
+        self.settings_save_requested.emit({"nav_order": order})
 
     def navigate_if_needed(self, page_idx: int, tab: int | None = None):
         """Used by TourOverlay for live-teach navigation."""
@@ -523,6 +542,12 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         tab_order = profile.get("tab_order")
         if tab_order and hasattr(self, "_tab_bar_widget"):
             self.apply_tab_order(tab_order)
+        # Restore nav order
+        nav_order = profile.get("nav_order")
+        if nav_order and hasattr(self, "_sidebar_nav"):
+            self.apply_nav_order(nav_order)
+        # Restore API keys
+        self.apply_api_keys(profile)
 
     def _apply_voice_settings(self, profile: dict):
         """Restore Voice Settings controls and TTS engine state from a profile dict."""
@@ -538,27 +563,23 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
         # Overlay shape
         shape = profile.get("overlay_shape", "rectangle")
         is_circle = (shape == "circle")
-        self._shape_circle.blockSignals(True)
-        self._shape_rect.blockSignals(True)
-        self._shape_circle.setChecked(is_circle)
-        self._shape_rect.setChecked(not is_circle)
-        self._shape_circle.blockSignals(False)
-        self._shape_rect.blockSignals(False)
+        if hasattr(self, "_shape_circle"):
+            self._shape_circle.blockSignals(True)
+            self._shape_rect.blockSignals(True)
+            self._shape_circle.setChecked(is_circle)
+            self._shape_rect.setChecked(not is_circle)
+            self._shape_circle.blockSignals(False)
+            self._shape_rect.blockSignals(False)
         self.shape_changed.emit(shape)
         self._update_dashboard_pill_icon()
 
         # Animation overlay checkboxes
         if hasattr(self, "_anim_spin_chk"):
             spin = bool(profile.get("overlay_anim_spin", True))
-            glow = bool(profile.get("overlay_anim_glow", False))
             self._anim_spin_chk.blockSignals(True)
-            self._anim_glow_chk.blockSignals(True)
             self._anim_spin_chk.setChecked(spin)
-            self._anim_glow_chk.setChecked(glow)
             self._anim_spin_chk.blockSignals(False)
-            self._anim_glow_chk.blockSignals(False)
             self.anim_spin_changed.emit(spin)
-            self.anim_glow_changed.emit(glow)
 
         # Volume
         vol_f = float(profile.get("volume", 1.0))
@@ -675,6 +696,10 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     def showEvent(self, event):
         super().showEvent(event)
         self._enable_dwm_shadow()
+        # Start the title fade timer only once, when the window first appears
+        if hasattr(self, "_dashboard_title") and not getattr(self, "_title_fade_armed", False):
+            self._title_fade_armed = True
+            self._restart_dashboard_title_fade()
 
     def _enable_dwm_shadow(self):
         """Restore Windows drop-shadow on a frameless window via DWM."""
@@ -693,3 +718,184 @@ class MainWindow(DashboardMixin, SettingsMixin, HistoryMixin, ProfileMixin,
     def closeEvent(self, event):
         event.ignore()
         self.hide()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Drag-reorderable sidebar nav (vertical)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Canonical nav items: (label, page_index)
+_NAV_DEFS = [
+    ("Voice Setting",   1),
+    ("Overlay Setting", 7),
+    ("My API Key",      8),
+    ("View History",    2),
+]
+_DEFAULT_NAV_ORDER = [1, 7, 8, 2]
+
+
+class _DraggableSidebarNav(QWidget):
+    """
+    Vertical list of nav buttons that can be reordered by dragging.
+
+    • Click  → navigate to that page
+    • Drag   → reorder; a horizontal indicator line shows the drop position
+    • Order  → persisted via MainWindow.get_nav_order() / apply_nav_order()
+    """
+
+    _DRAG_THRESHOLD = 6
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self._mw     = main_window
+        self._order  = list(_DEFAULT_NAV_ORDER)
+        self._active = -1
+
+        self._drag_idx:       int | None   = None
+        self._drag_press_pos: QPoint | None = None
+        self._dragging        = False
+        self._drop_pos:       int | None   = None
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+        self._layout = lay
+        self._buttons: list[QPushButton] = []
+        self._rebuild()
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_active(self, page_idx: int):
+        self._active = page_idx
+        self._refresh_checked()
+
+    def apply_order(self, order: list):
+        if (isinstance(order, list)
+                and len(order) == len(_DEFAULT_NAV_ORDER)
+                and sorted(order) == sorted(_DEFAULT_NAV_ORDER)):
+            self._order = list(order)
+        self._rebuild()
+
+    def current_order(self) -> list:
+        return list(self._order)
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _label_for(self, page_idx: int) -> str:
+        for label, idx in _NAV_DEFS:
+            if idx == page_idx:
+                return label
+        return str(page_idx)
+
+    def _rebuild(self):
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        self._buttons.clear()
+
+        for pos, page_idx in enumerate(self._order):
+            btn = QPushButton(self._label_for(page_idx))
+            btn.setCheckable(True)
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.CursorShape.OpenHandCursor)
+
+            btn.mousePressEvent   = lambda ev, i=pos: self._btn_press(ev, i)
+            btn.mouseMoveEvent    = lambda ev, i=pos: self._btn_move(ev, i)
+            btn.mouseReleaseEvent = lambda ev, i=pos, p=page_idx: self._btn_release(ev, i, p)
+
+            self._layout.addWidget(btn)
+            self._buttons.append(btn)
+
+        self._refresh_checked()
+
+    def _refresh_checked(self):
+        for pos, page_idx in enumerate(self._order):
+            if pos < len(self._buttons):
+                self._buttons[pos].setChecked(page_idx == self._active)
+
+    # ── Drag handling ─────────────────────────────────────────────────────────
+
+    def _btn_press(self, ev, pos: int):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._drag_idx       = pos
+            self._drag_press_pos = ev.globalPosition().toPoint()
+            self._dragging       = False
+        ev.accept()
+
+    def _btn_move(self, ev, pos: int):
+        if not (ev.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if self._drag_press_pos is None:
+            return
+        delta = (ev.globalPosition().toPoint() - self._drag_press_pos).manhattanLength()
+        if not self._dragging and delta > self._DRAG_THRESHOLD:
+            self._dragging = True
+            self._buttons[pos].setCursor(Qt.CursorShape.ClosedHandCursor)
+        if self._dragging:
+            local_y = self.mapFromGlobal(ev.globalPosition().toPoint()).y()
+            self._drop_pos = self._y_to_insert_pos(local_y)
+            self.update()
+        ev.accept()
+
+    def _btn_release(self, ev, pos: int, page_idx: int):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            was_dragging = self._dragging
+            if was_dragging and self._drop_pos is not None:
+                self._do_reorder(self._drag_idx, self._drop_pos)
+            self._dragging       = False
+            self._drop_pos       = None
+            self._drag_idx       = None
+            self._drag_press_pos = None
+            if pos < len(self._buttons):
+                self._buttons[pos].setCursor(Qt.CursorShape.OpenHandCursor)
+            self.update()
+            if not was_dragging:
+                self._mw._navigate(page_idx)
+        ev.accept()
+
+    def _y_to_insert_pos(self, y: int) -> int:
+        for i, btn in enumerate(self._buttons):
+            mid = btn.y() + btn.height() // 2
+            if y < mid:
+                return i
+        return len(self._buttons)
+
+    def _do_reorder(self, from_pos: int, to_pos: int):
+        if from_pos is None:
+            return
+        to_pos = max(0, min(to_pos, len(self._order)))
+        if from_pos == to_pos or from_pos + 1 == to_pos:
+            return
+        item = self._order.pop(from_pos)
+        if to_pos > from_pos:
+            to_pos -= 1
+        self._order.insert(to_pos, item)
+        self._rebuild()
+        self._mw._on_nav_order_changed()
+
+    # ── Drop indicator ────────────────────────────────────────────────────────
+
+    def paintEvent(self, ev):
+        super().paintEvent(ev)
+        if not self._dragging or self._drop_pos is None:
+            return
+        from PyQt6.QtGui import QPainter, QColor, QPen
+        painter = QPainter(self)
+        is_dark = getattr(self._mw, "_dark", False)
+        pen = QPen(QColor("#ffffff" if is_dark else "#1a1a1a"), 2)
+        painter.setPen(pen)
+        y = self._insert_y(self._drop_pos)
+        painter.drawLine(0, y, self.width(), y)
+        painter.end()
+
+    def _insert_y(self, pos: int) -> int:
+        n = len(self._buttons)
+        if not self._buttons:
+            return 0
+        if pos == 0:
+            return self._buttons[0].y()
+        if pos >= n:
+            b = self._buttons[-1]
+            return b.y() + b.height()
+        return self._buttons[pos].y()
