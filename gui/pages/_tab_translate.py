@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QComboBox, QApplication
 )
+from gui._window_shared import scaled  # noqa: F401
 from PyQt6.QtCore import Qt
 
 

@@ -15,9 +15,12 @@ from gui.pages._tab_summary import SummaryTabMixin
 from gui.pages._tab_translate import TranslateTabMixin
 from gui.pages._tab_code import CodeTabMixin
 from gui.pages._tab_generate import GenerateTabMixin
+from gui.pages._tab_ask import AskTabMixin
+from gui.pages._tab_live_caption import LiveCaptionTabMixin
+from gui.pages._tab_grammar import GrammarTabMixin
 
 # Canonical indices that require at least one API key
-_GATED_TABS = {2, 3, 4, 5}  # Summary, Translate, Code, Generate
+_GATED_TABS = {2, 3, 4, 5, 6}  # Summary, Translate, Code, Generate, Ask
 
 
 class DashboardMixin(
@@ -27,6 +30,9 @@ class DashboardMixin(
     TranslateTabMixin,
     CodeTabMixin,
     GenerateTabMixin,
+    AskTabMixin,
+    LiveCaptionTabMixin,
+    GrammarTabMixin,
 ):
     """Mixin providing the full Dashboard page for MainWindow."""
 
@@ -56,6 +62,9 @@ class DashboardMixin(
         self._tab_stack.addWidget(self._wrap_with_gate(self._build_translate_tab(),3))  # 3
         self._tab_stack.addWidget(self._wrap_with_gate(self._build_code_tab(),     4))  # 4
         self._tab_stack.addWidget(self._wrap_with_gate(self._build_generate_tab(), 5))  # 5
+        self._tab_stack.addWidget(self._wrap_with_gate(self._build_ask_tab(),      6))  # 6
+        self._tab_stack.addWidget(self._build_live_caption_tab())                       # 7
+        self._tab_stack.addWidget(self._build_grammar_tab())                            # 8
         lay.addWidget(self._tab_stack, 1)
         # Refresh lock icons after stack is built
         QTimer.singleShot(0, lambda: self._tab_bar_widget.refresh_lock_state())

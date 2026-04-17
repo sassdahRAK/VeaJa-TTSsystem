@@ -61,3 +61,29 @@ def _make_square_pixmap(path: str, size: int) -> QPixmap | None:
         px = px.copy(x, y, phys, phys)
     px.setDevicePixelRatio(dpr)
     return px
+
+
+# ── Cross-platform DPI-aware size helper ──────────────────────────────────────
+
+def _dpi_scale() -> float:
+    """
+    Return a scale factor relative to 96 DPI (Windows baseline).
+    96 DPI  → 1.0   (Windows default)
+    120 DPI → 1.25  (Windows 125%)
+    144 DPI → 1.5   (Windows 150% / typical HiDPI)
+    192 DPI → 2.0   (Retina / 200%)
+    Linux at 96 DPI → 1.0  (same baseline)
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app and app.primaryScreen():
+            return app.primaryScreen().logicalDotsPerInch() / 96.0
+    except Exception:
+        pass
+    return 1.0
+
+
+def scaled(px: int) -> int:
+    """Scale a logical pixel value by the current DPI factor."""
+    return max(1, round(px * _dpi_scale()))

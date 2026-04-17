@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QLineEdit, QStackedWidget
 )
+from gui._window_shared import scaled  # noqa: F401
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QFont
 
@@ -759,6 +760,21 @@ class ApiKeysMixin:
                 name, subtitle, profile_key, placeholder, docs_url, desc, logo_svg, logo_color, badge
             ))
 
+        # ── Custom API cards (user-added) ─────────────────────────────────
+        sep_lbl = QLabel("My Custom APIs")
+        sep_lbl.setObjectName("shapeSectionLabel")
+        sc_lay.addWidget(sep_lbl)
+
+        self._custom_api_cards_lay = QVBoxLayout()
+        self._custom_api_cards_lay.setSpacing(12)
+        sc_lay.addLayout(self._custom_api_cards_lay)
+
+        add_btn = QPushButton("＋  Add custom API")
+        add_btn.setObjectName("btnOutline")
+        add_btn.setFixedHeight(36)
+        add_btn.clicked.connect(self._add_custom_api_card)
+        sc_lay.addWidget(add_btn)
+
         sc_lay.addStretch()
         scroll.setWidget(sc)
         lay.addWidget(scroll, 1)
@@ -889,6 +905,256 @@ class ApiKeysMixin:
         visible = not desc_lbl.isVisible()
         desc_lbl.setVisible(visible)
         btn.setText("See less ▴" if visible else "See more ▾")
+
+    # ── Custom API card management ────────────────────────────────────────────
+
+    def _add_custom_api_card(self):
+        """Open a dialog to define a new custom API card."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+            QPushButton, QTextEdit, QFormLayout
+        )
+        dlg = QDialog()
+        dlg.setWindowTitle("Add Custom API")
+        dlg.setMinimumWidth(440)
+        dlg.setModal(True)
+
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(12)
+
+        lay.addWidget(QLabel("Add your own API provider:", objectName="pageTitle"))
+
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        name_field = QLineEdit()
+        name_field.setObjectName("settingsInput")
+        name_field.setPlaceholderText("e.g. My Company AI")
+        name_field.setFixedHeight(34)
+        form.addRow("Name *", name_field)
+
+        subtitle_field = QLineEdit()
+        subtitle_field.setObjectName("settingsInput")
+        subtitle_field.setPlaceholderText("e.g. Internal LLM · v2")
+        subtitle_field.setFixedHeight(34)
+        form.addRow("Subtitle", subtitle_field)
+
+        key_field = QLineEdit()
+        key_field.setObjectName("settingsInput")
+        key_field.setPlaceholderText("Paste your API key here")
+        key_field.setEchoMode(QLineEdit.EchoMode.Password)
+        key_field.setFixedHeight(34)
+        form.addRow("API Key", key_field)
+
+        url_field = QLineEdit()
+        url_field.setObjectName("settingsInput")
+        url_field.setPlaceholderText("https://docs.yourapi.com/keys")
+        url_field.setFixedHeight(34)
+        form.addRow("Docs URL", url_field)
+
+        desc_field = QTextEdit()
+        desc_field.setObjectName("featureEdit")
+        desc_field.setPlaceholderText("Describe what this API is best for, its strengths, and which Veaja features it powers…")
+        desc_field.setFixedHeight(80)
+        form.addRow("Description", desc_field)
+
+        lay.addLayout(form)
+
+        err_lbl = QLabel("")
+        err_lbl.setStyleSheet("color: #e53935; font-size: 11px;")
+        err_lbl.setVisible(False)
+        lay.addWidget(err_lbl)
+
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("btnOutline")
+        cancel_btn.setFixedHeight(32)
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_row.addWidget(cancel_btn)
+
+        save_btn = QPushButton("Add")
+        save_btn.setObjectName("btnPrimary")
+        save_btn.setFixedHeight(32)
+        btn_row.addWidget(save_btn)
+        lay.addLayout(btn_row)
+
+        def _save():
+            name = name_field.text().strip()
+            if not name:
+                err_lbl.setText("Name is required.")
+                err_lbl.setVisible(True)
+                return
+            custom = {
+                "name":     name,
+                "subtitle": subtitle_field.text().strip() or "Custom API",
+                "key":      key_field.text().strip(),
+                "url":      url_field.text().strip(),
+                "desc":     desc_field.toPlainText().strip(),
+            }
+            dlg.accept()
+            self._save_custom_api(custom)
+            self._render_custom_api_card(custom)
+
+        save_btn.clicked.connect(_save)
+        name_field.returnPressed.connect(_save)
+        dlg.exec()
+
+    def _render_custom_api_card(self, custom: dict):
+        """Build and insert a custom API card into the layout."""
+        card = QWidget()
+        card.setObjectName("infoCard")
+        c_lay = QVBoxLayout(card)
+        c_lay.setContentsMargins(18, 14, 18, 14)
+        c_lay.setSpacing(8)
+
+        # Header row
+        hdr = QHBoxLayout()
+        hdr.setSpacing(10)
+
+        # Initials avatar
+        initials = (custom["name"][:2]).upper()
+        avatar = QLabel(initials)
+        avatar.setFixedSize(28, 28)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setStyleSheet(
+            "background: #6c47ff; color: white; border-radius: 6px; "
+            "font-size: 11px; font-weight: 700;"
+        )
+        hdr.addWidget(avatar, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        name_col = QVBoxLayout()
+        name_col.setSpacing(1)
+        name_col.setContentsMargins(0, 0, 0, 0)
+        name_lbl = QLabel(custom["name"])
+        name_lbl.setObjectName("cardTitle")
+        sub_lbl = QLabel(custom.get("subtitle", "Custom API"))
+        sub_lbl.setObjectName("settingsLabel")
+        sub_lbl.setStyleSheet("font-size: 11px;")
+        name_col.addWidget(name_lbl)
+        name_col.addWidget(sub_lbl)
+        hdr.addLayout(name_col, 1)
+
+        # Docs link
+        if custom.get("url"):
+            link_btn = QPushButton("Docs ↗")
+            link_btn.setObjectName("btnOutline")
+            link_btn.setFixedSize(80, 28)
+            link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            link_btn.clicked.connect(lambda _=False, u=custom["url"]: self._open_url(u))
+            hdr.addWidget(link_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Delete button
+        del_btn = QPushButton("✕")
+        del_btn.setObjectName("historyDel")
+        del_btn.setFixedSize(28, 28)
+        del_btn.setToolTip("Remove this custom API")
+        del_btn.clicked.connect(lambda _=False, c=card, n=custom["name"]:
+                                self._delete_custom_api(c, n))
+        hdr.addWidget(del_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        c_lay.addLayout(hdr)
+
+        # See more / description
+        if custom.get("desc"):
+            desc_lbl = QLabel(custom["desc"])
+            desc_lbl.setObjectName("cardBody")
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setStyleSheet("font-size: 12px; padding-top: 2px;")
+            desc_lbl.setVisible(False)
+
+            see_btn = QPushButton("See more ▾")
+            see_btn.setObjectName("btnOutline")
+            see_btn.setFixedHeight(24)
+            see_btn.setStyleSheet("font-size: 11px; padding: 0 10px;")
+            see_btn.clicked.connect(
+                lambda _=False, d=desc_lbl, b=see_btn: self._toggle_desc(d, b)
+            )
+            see_row = QHBoxLayout()
+            see_row.setContentsMargins(0, 0, 0, 0)
+            see_row.addWidget(see_btn)
+            see_row.addStretch()
+            c_lay.addLayout(see_row)
+            c_lay.addWidget(desc_lbl)
+
+        # Key input row
+        if custom.get("key") is not None:
+            input_row = QHBoxLayout()
+            input_row.setSpacing(8)
+
+            field = QLineEdit()
+            field.setObjectName("settingsInput")
+            field.setPlaceholderText("API key")
+            field.setEchoMode(QLineEdit.EchoMode.Password)
+            field.setFixedHeight(32)
+            field.setText(custom.get("key", ""))
+            # Store with a unique key based on name
+            safe_key = f"custom_{custom['name'].lower().replace(' ', '_')}"
+            self._api_key_inputs[safe_key] = field
+            input_row.addWidget(field, 1)
+
+            show_btn = QPushButton("Show")
+            show_btn.setObjectName("btnOutline")
+            show_btn.setFixedSize(70, 32)
+            hide_btn = QPushButton("Hide")
+            hide_btn.setObjectName("btnOutline")
+            hide_btn.setFixedSize(70, 32)
+            hide_btn.setVisible(False)
+
+            show_btn.clicked.connect(
+                lambda _=False, f=field, sb=show_btn, hb=hide_btn:
+                self._api_confirm_then(lambda: self._api_reveal_field(f, sb, hb))
+            )
+            hide_btn.clicked.connect(
+                lambda _=False, f=field, sb=show_btn, hb=hide_btn:
+                self._api_hide_field(f, sb, hb)
+            )
+            input_row.addWidget(show_btn)
+            input_row.addWidget(hide_btn)
+            c_lay.addLayout(input_row)
+
+        self._custom_api_cards_lay.addWidget(card)
+
+    def _save_custom_api(self, custom: dict):
+        """Persist custom API list to profile."""
+        existing = getattr(self, "_custom_apis", [])
+        existing.append(custom)
+        self._custom_apis = existing
+        import json
+        self.settings_save_requested.emit({
+            "custom_apis": json.dumps(existing)
+        })
+
+    def _delete_custom_api(self, card: QWidget, name: str):
+        """Remove a custom API card."""
+        card.setParent(None)
+        card.deleteLater()
+        self._custom_apis = [
+            c for c in getattr(self, "_custom_apis", [])
+            if c.get("name") != name
+        ]
+        import json
+        self.settings_save_requested.emit({
+            "custom_apis": json.dumps(self._custom_apis)
+        })
+
+    def apply_custom_apis(self, profile: dict):
+        """Restore custom API cards from profile on startup."""
+        import json
+        raw = profile.get("custom_apis", "[]")
+        try:
+            customs = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            customs = []
+        self._custom_apis = customs
+        if not hasattr(self, "_custom_api_cards_lay"):
+            return
+        # Clear existing custom cards
+        while self._custom_api_cards_lay.count():
+            item = self._custom_api_cards_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for custom in customs:
+            self._render_custom_api_card(custom)
 
     def _make_provider_pixmap(self, svg_body: str, size: int):
         from PyQt6.QtSvg import QSvgRenderer

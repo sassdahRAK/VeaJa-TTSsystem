@@ -81,14 +81,17 @@ _FlowLayout = FlowLayout
 
 # Canonical tab definitions — imported by dashboard_mixin and _DraggableTabBar
 TAB_DEFS = [
-    ("Overlay",     0),
-    ("Text label",  1),
-    ("Summary",     2),
-    ("Translate",   3),
-    ("Code",        4),
-    ("Generate",    5),
+    ("Overlay",      0),
+    ("Text label",   1),
+    ("Summary",      2),
+    ("Translate",    3),
+    ("Code",         4),
+    ("Generate",     5),
+    ("Ask",          6),
+    ("Live Caption", 7),
+    ("Grammar",      8),
 ]
-DEFAULT_TAB_ORDER = [0, 1, 2, 3, 4, 5]
+DEFAULT_TAB_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 
 
 class DraggableTabBar(QWidget):

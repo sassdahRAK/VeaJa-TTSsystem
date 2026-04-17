@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QStackedWidget, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QScrollArea, QFrame
 )
+from gui._window_shared import scaled  # noqa: F401
 from PyQt6.QtCore import Qt
 
 # ── Profession presets ────────────────────────────────────────────────────────
@@ -57,6 +58,30 @@ _PROFESSIONS = [
      ["api_key_openai", "api_key_gemini", "api_key_claude"]),
     ("Electronics", "⚡",
      "Summarise focusing on circuit design, components, specifications, and technical parameters.",
+     ["api_key_edgeimpulse", "api_key_aws_iot"],
+     ["api_key_openai", "api_key_gemini", "api_key_claude"]),
+    ("Network",     "🌐",
+     "Summarise focusing on network topology, protocols, subnets, security policies, and device configurations.",
+     ["api_key_aws_iot"],
+     ["api_key_openai", "api_key_gemini", "api_key_claude"]),
+    ("OS Engineer", "🖥️",
+     "Summarise focusing on kernel internals, system calls, memory management, scheduling, and OS architecture.",
+     ["api_key_copilot", "api_key_codewhisperer"],
+     ["api_key_openai", "api_key_gemini", "api_key_claude"]),
+    ("Cyber",       "🔐",
+     "Summarise focusing on vulnerabilities, attack vectors, CVEs, mitigation strategies, and security frameworks (NIST, OWASP).",
+     ["api_key_copilot"],
+     ["api_key_openai", "api_key_gemini", "api_key_claude"]),
+    ("AI Engineer", "🤖",
+     "Summarise focusing on model architecture, training methodology, datasets, evaluation metrics, and deployment considerations.",
+     ["api_key_openai", "api_key_gemini", "api_key_claude"],
+     ["api_key_mistral", "api_key_cohere"]),
+    ("Drone",       "🚁",
+     "Summarise focusing on flight dynamics, autopilot systems, sensors, regulations, and mission planning.",
+     ["api_key_edgeimpulse"],
+     ["api_key_openai", "api_key_gemini", "api_key_claude"]),
+    ("Robotic",     "🦾",
+     "Summarise focusing on kinematics, actuators, sensors, ROS architecture, control loops, and embedded systems.",
      ["api_key_edgeimpulse", "api_key_aws_iot"],
      ["api_key_openai", "api_key_gemini", "api_key_claude"]),
 ]
@@ -465,6 +490,12 @@ class SummaryTabMixin:
         "Student":     "https://platform.openai.com/api-keys",
         "Artist":      "https://developer.adobe.com/firefly-api/",
         "Electronics": "https://studio.edgeimpulse.com/",
+        "Network":     "https://platform.openai.com/api-keys",
+        "OS Engineer": "https://github.com/settings/tokens",
+        "Cyber":       "https://github.com/settings/tokens",
+        "AI Engineer": "https://platform.openai.com/api-keys",
+        "Drone":       "https://studio.edgeimpulse.com/",
+        "Robotic":     "https://studio.edgeimpulse.com/",
     }
 
     _PROF_IDEAL_AI = {
@@ -479,6 +510,12 @@ class SummaryTabMixin:
         "Student":     "OpenAI GPT-4o or Google Gemini",
         "Artist":      "Adobe Firefly or Midjourney",
         "Electronics": "Edge Impulse or OpenAI",
+        "Network":     "OpenAI GPT-4o or Gemini",
+        "OS Engineer": "GitHub Copilot or OpenAI",
+        "Cyber":       "GitHub Copilot or OpenAI",
+        "AI Engineer": "OpenAI GPT-4o or Google Gemini",
+        "Drone":       "Edge Impulse or OpenAI",
+        "Robotic":     "Edge Impulse or OpenAI",
     }
 
     def _update_sum_notice(self, label: str, ideal_keys: list, show: bool):

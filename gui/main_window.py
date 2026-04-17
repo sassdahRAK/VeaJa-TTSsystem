@@ -23,7 +23,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtCore import QRectF
 
-from gui._window_shared import ASSETS, STYLES, _make_square_pixmap, _make_circle_pixmap  # noqa: E402
+from gui._window_shared import ASSETS, STYLES, _make_square_pixmap, _make_circle_pixmap, scaled  # noqa: E402
 
 
 # ── Read state ─────────────────────────────────────────────────────────────────
@@ -149,10 +149,10 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self._privacy_btn: QPushButton | None  = None
 
         self.setWindowTitle("Veaja")
-        self.setMinimumSize(780, 580)
-        self.resize(900, 660)
+        self.setMinimumSize(scaled(780), scaled(580))
+        self.resize(scaled(900), scaled(660))
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
-        self._title_bar_height = 38
+        self._title_bar_height = scaled(38)
         self._title_bar_widget: QWidget | None = None
         self._title_bar_label: QLabel | None = None
         self._max_btn: QPushButton | None = None
@@ -304,7 +304,7 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
     def _build_sidebar(self) -> QWidget:
         sb = QWidget()
         sb.setObjectName("sidebar")
-        sb.setFixedWidth(240)
+        sb.setFixedWidth(scaled(240))
 
         outer = QVBoxLayout(sb)
         outer.setContentsMargins(20, 16, 20, 28)
@@ -558,6 +558,8 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
             self.apply_nav_order(nav_order)
         # Restore API keys
         self.apply_api_keys(profile)
+        # Restore custom API cards
+        self.apply_custom_apis(profile)
         # Cache password hash for the lock screen
         self._api_pw_hash_cache = profile.get("api_key_password_hash", "")
         # Cache full profile for gate checks

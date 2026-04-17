@@ -30,7 +30,7 @@ DEFAULT_PROFILE: dict = {
     "overlay_anim_spin": True,         # spin logo while reading
     "voice_index":       0,            # index into the current voice list
     "volume":          1.0,          # 0.0–1.0
-    "tab_order":       [0, 1, 2, 3, 4, 5], # dashboard tab display order
+    "tab_order":       [0, 1, 2, 3, 4, 5, 6, 7, 8], # dashboard tab display order
     "nav_order":       [1, 7, 8, 2],  # sidebar nav display order (page indices)
     # API keys (stored locally, never transmitted except to the chosen provider)
     "api_key_openai":          "",
@@ -70,6 +70,7 @@ DEFAULT_PROFILE: dict = {
     "api_key_password_hash":   "",
     "api_recovery_contacts":   "",  # "||"-separated list of emails/phones
     "usage_stats":             {},  # feature & API usage counters
+    "custom_apis":             "[]", # JSON list of user-defined API cards
 }
 
 
@@ -148,7 +149,7 @@ class ProfileManager(QObject):
         if v < CURRENT_PROFILE_VERSION:
             # v0 → v1: no structural changes
             # v1 → v2: add tab_order field
-            data.setdefault("tab_order", [0, 1, 2, 3, 4, 5])
+            data.setdefault("tab_order", [0, 1, 2, 3, 4, 5, 6, 7, 8])
             data.setdefault("nav_order", [1, 7, 8, 9, 2])
             for k in ("api_key_openai", "api_key_gemini", "api_key_claude",
                       "api_key_aistudio", "api_key_mistral", "api_key_cohere",

@@ -25,9 +25,15 @@ if ROOT not in sys.path:
 
 # ── Qt high-DPI (must be set before QApplication) ───────────────────────────
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
+
+# Enable HiDPI pixmaps and automatic scaling on all platforms
+QApplication.setHighDpiScaleFactorRoundingPolicy(
+    Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+)
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 
 from gui.splash_screen import SplashScreen

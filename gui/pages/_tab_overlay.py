@@ -4,6 +4,7 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame, QStackedLayout
 )
+from gui._window_shared import scaled  # noqa: F401
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from PyQt6.QtGui import QPixmap, QPainter
 

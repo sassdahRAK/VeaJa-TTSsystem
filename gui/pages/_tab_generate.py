@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QApplication
 )
+from gui._window_shared import scaled  # noqa: F401
 from PyQt6.QtCore import Qt
 
 from gui.pages._flow_layout import FlowLayout as _FlowLayout
@@ -21,6 +22,9 @@ class GenerateTabMixin:
         "Generate a multi-slide presentation outline (title + bullet points per slide).",
         "Generate a video script with scenes, narration and on-screen text.",
         "Generate a self-contained mini web page as raw HTML + CSS.",
+        "Generate a full web project scaffold: HTML, CSS, JS, and file structure.",
+        "Generate an app development plan: architecture, screens, components, and tech stack.",
+        "Generate a network topology plan: devices, subnets, protocols, and config snippets.",
     ]
 
     def _build_generate_tab(self) -> QWidget:
@@ -37,7 +41,7 @@ class GenerateTabMixin:
         mb_lay.setContentsMargins(0, 4, 0, 4)
 
         self._gen_modes = ["Poster", "Prompt", "Instruction", "Caption", "Adjust",
-                           "Slide", "Video", "HTML"]
+                           "Slide", "Video", "HTML", "Web", "App", "Network"]
         self._gen_mode_btns: list[QPushButton] = []
         for i, label in enumerate(self._gen_modes):
             btn = QPushButton(label)
@@ -272,6 +276,9 @@ class GenerateTabMixin:
             "Slide": self._gen_slide_template(text),
             "Video": self._gen_video_template(text),
             "HTML":  self._gen_html_template(text),
+            "Web":     self._gen_web_template(text),
+            "App":     self._gen_app_template(text),
+            "Network": self._gen_network_template(text),
         }
         return templates.get(mode, text) + attach_note
 
@@ -440,4 +447,117 @@ class GenerateTabMixin:
             "  </main>\n"
             f"  <footer>© 2025 {title}. All rights reserved.</footer>\n"
             "</body>\n</html>"
+        )
+
+    def _gen_web_template(self, text: str) -> str:
+        title = text[:50] or "My Web Project"
+        return (
+            f"# Web Project: {title}\n"
+            f"{'─'*50}\n\n"
+            f"## Project Structure\n"
+            f"  {title.lower().replace(' ', '-')}/\n"
+            f"  ├── index.html          # Main entry point\n"
+            f"  ├── about.html          # About page\n"
+            f"  ├── css/\n"
+            f"  │   ├── style.css       # Global styles\n"
+            f"  │   └── responsive.css  # Mobile breakpoints\n"
+            f"  ├── js/\n"
+            f"  │   ├── main.js         # App logic\n"
+            f"  │   └── api.js          # API calls\n"
+            f"  ├── assets/\n"
+            f"  │   ├── images/\n"
+            f"  │   └── fonts/\n"
+            f"  └── README.md\n\n"
+            f"## Tech Stack\n"
+            f"  Frontend:  HTML5 · CSS3 · Vanilla JS (or React/Vue)\n"
+            f"  Styling:   Tailwind CSS / Bootstrap\n"
+            f"  Build:     Vite / Webpack\n"
+            f"  Deploy:    Vercel / Netlify / GitHub Pages\n\n"
+            f"## Key Pages\n"
+            f"  1. Home       — Hero, features, CTA\n"
+            f"  2. About      — Team, mission, story\n"
+            f"  3. Services   — {text[:60] or 'List your services'}\n"
+            f"  4. Contact    — Form, map, social links\n\n"
+            f"## SEO & Performance\n"
+            f"  • Meta tags, Open Graph, sitemap.xml\n"
+            f"  • Lazy loading images\n"
+            f"  • Minified CSS/JS in production\n\n"
+            f"— Connect an AI API key to generate real code for each file."
+        )
+
+    def _gen_app_template(self, text: str) -> str:
+        title = text[:50] or "My App"
+        return (
+            f"# App Development Plan: {title}\n"
+            f"{'─'*50}\n\n"
+            f"## Overview\n"
+            f"  {text or 'Describe your app idea here.'}\n\n"
+            f"## Platform\n"
+            f"  [ ] Mobile (iOS + Android) — React Native / Flutter\n"
+            f"  [ ] Desktop — Electron / PyQt / Tauri\n"
+            f"  [ ] Web App — React / Vue / Next.js\n\n"
+            f"## Architecture\n"
+            f"  Frontend:  Component-based UI\n"
+            f"  Backend:   REST API / GraphQL\n"
+            f"  Database:  PostgreSQL / SQLite / Firebase\n"
+            f"  Auth:      JWT / OAuth2\n"
+            f"  Storage:   S3 / Cloudinary\n\n"
+            f"## Screens / Views\n"
+            f"  1. Splash / Onboarding\n"
+            f"  2. Login / Register\n"
+            f"  3. Dashboard / Home\n"
+            f"  4. {text[:40] or 'Main feature screen'}\n"
+            f"  5. Settings / Profile\n\n"
+            f"## Key Components\n"
+            f"  • Navigation (bottom tab / drawer)\n"
+            f"  • Data fetching (React Query / SWR)\n"
+            f"  • State management (Redux / Zustand / Provider)\n"
+            f"  • Push notifications\n"
+            f"  • Offline support\n\n"
+            f"## Development Phases\n"
+            f"  Phase 1 — MVP (4 weeks): Core screens + auth\n"
+            f"  Phase 2 — Beta (3 weeks): API integration + testing\n"
+            f"  Phase 3 — Launch (2 weeks): Polish + store submission\n\n"
+            f"— Connect an AI API key to generate real code scaffolding."
+        )
+
+    def _gen_network_template(self, text: str) -> str:
+        title = text[:50] or "Network Design"
+        return (
+            f"# Network Topology Plan: {title}\n"
+            f"{'─'*50}\n\n"
+            f"## Overview\n"
+            f"  {text or 'Describe your network requirements here.'}\n\n"
+            f"## Network Diagram (Text)\n"
+            f"  Internet\n"
+            f"      │\n"
+            f"  [Firewall / Router]  — WAN: 203.0.113.1/30\n"
+            f"      │\n"
+            f"  [Core Switch L3]     — VLAN trunk\n"
+            f"    ├── VLAN 10 (LAN)     192.168.10.0/24\n"
+            f"    ├── VLAN 20 (DMZ)     192.168.20.0/24\n"
+            f"    ├── VLAN 30 (Mgmt)    192.168.30.0/24\n"
+            f"    └── VLAN 40 (WiFi)    192.168.40.0/24\n\n"
+            f"## Devices\n"
+            f"  • Firewall:      Cisco ASA / pfSense / FortiGate\n"
+            f"  • Core Switch:   Cisco Catalyst 3850 / Juniper EX\n"
+            f"  • Access Points: Ubiquiti UniFi / Cisco Meraki\n"
+            f"  • Servers:       Web, DB, DNS, NTP\n\n"
+            f"## Protocols & Services\n"
+            f"  Routing:   OSPF / BGP (external)\n"
+            f"  DHCP:      Scope per VLAN\n"
+            f"  DNS:       Internal + forwarder to 8.8.8.8\n"
+            f"  VPN:       IPSec / WireGuard for remote access\n"
+            f"  Monitoring: SNMP / Zabbix / Grafana\n\n"
+            f"## Security\n"
+            f"  • ACLs on inter-VLAN routing\n"
+            f"  • IDS/IPS on DMZ\n"
+            f"  • 802.1X port authentication\n"
+            f"  • NTP sync for log correlation\n\n"
+            f"## Sample Config Snippet (Cisco IOS)\n"
+            f"  interface Vlan10\n"
+            f"   ip address 192.168.10.1 255.255.255.0\n"
+            f"   ip helper-address 192.168.30.10\n"
+            f"   no shutdown\n\n"
+            f"— Connect an AI API key to generate full device configs."
         )
