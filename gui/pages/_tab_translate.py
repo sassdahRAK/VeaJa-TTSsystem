@@ -35,10 +35,14 @@ class TranslateTabMixin:
             self._translate_from_combo.addItem(lang)
         lang_row.addWidget(self._translate_from_combo)
 
-        arrow = QLabel("→")
-        arrow.setObjectName("featureLabel")
-        arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lang_row.addWidget(arrow)
+        # Swap button — replaces the static arrow
+        swap_btn = QPushButton("⇄")
+        swap_btn.setObjectName("btnOutline")
+        swap_btn.setFixedSize(34, 30)
+        swap_btn.setToolTip("Swap languages")
+        swap_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        swap_btn.clicked.connect(self._swap_translate_langs)
+        lang_row.addWidget(swap_btn)
 
         to_lbl = QLabel("To")
         to_lbl.setObjectName("featureLabel")
@@ -150,6 +154,33 @@ class TranslateTabMixin:
 
         lay.addLayout(panels, 1)
         return frame
+
+    def _swap_translate_langs(self):
+        """Swap From and To language selections, and swap the text content."""
+        from_idx = self._translate_from_combo.currentIndex()
+        to_idx   = self._translate_to_combo.currentIndex()
+        from_txt = self._translate_from_combo.currentText()
+        to_txt   = self._translate_to_combo.currentText()
+
+        # Skip swap if From is "Auto detect"
+        if from_txt == "Auto detect":
+            return
+
+        # Find matching index in each combo
+        new_from = self._translate_to_combo.findText(from_txt)
+        new_to   = self._translate_from_combo.findText(to_txt)
+
+        if new_from >= 0:
+            self._translate_from_combo.setCurrentIndex(new_from)
+        if new_to >= 0:
+            self._translate_to_combo.setCurrentIndex(new_to)
+
+        # Also swap the text content between panels
+        src = self._translate_input.toPlainText()
+        out = self._translate_output.toPlainText()
+        if out.strip() and not out.startswith("[Translation"):
+            self._translate_input.setPlainText(out)
+            self._translate_output.setPlainText(src)
 
     def _on_translate_input_changed(self):
         chars = len(self._translate_input.toPlainText())

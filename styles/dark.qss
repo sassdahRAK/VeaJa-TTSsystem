@@ -462,3 +462,42 @@ QWidget#codeDetailPanel {
     border: 1px solid #555555;
     border-radius: 8px;
 }
+
+/* ── Profession selector buttons (Summary tab) ── */
+QPushButton#profBtn {
+    background: transparent;
+    border: 1px solid #444444;
+    border-radius: 6px;
+    color: #aaaaaa;
+    font-size: 13px;
+    padding: 4px 14px;
+}
+QPushButton#profBtn:hover:!checked { border-color: #888888; color: #cccccc; }
+QPushButton#profBtn:checked {
+    border: 2px solid #e53935;
+    color: #ffffff;
+    font-weight: 600;
+    background: transparent;
+}
+
+/* ── Summary field notice banner ── */
+QWidget#sumNoticeBox {
+    background: #1e2a3a;
+    border: 1px solid #2a4a6a;
+    border-radius: 8px;
+}
+
+/* ── Expandable grid rows ── */
+QWidget#expandableRow { background: transparent; }
+QWidget#expandableRowHeader {
+    background: #2b2b2b;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+}
+QWidget#expandableRowHeader:hover { background: #333333; }
+QWidget#expandableRowBody {
+    background: #222222;
+    border: 1px solid #3a3a3a;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+}

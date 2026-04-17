@@ -156,13 +156,29 @@ class DraggableTabBar(QWidget):
                 item.widget().setParent(None)
         self._buttons.clear()
 
+        _GATED = {2, 3, 4, 5}
+        has_key = getattr(self._mixin, "_has_any_api_key", lambda: True)()
+
         for pos, canonical in enumerate(self._order):
-            label = TAB_DEFS[canonical][0] if canonical < len(TAB_DEFS) else str(canonical)
-            btn = QPushButton(label)
+            base_label = TAB_DEFS[canonical][0] if canonical < len(TAB_DEFS) else str(canonical)
+            locked = canonical in _GATED and not has_key
+
+            btn = QPushButton(base_label)
             btn.setObjectName("tabBtn")
             btn.setCheckable(True)
             btn.setFixedHeight(36)
             btn.setCursor(Qt.CursorShape.OpenHandCursor)
+            # Let the button size to its content — no fixed width
+            btn.setSizePolicy(
+                btn.sizePolicy().horizontalPolicy(),
+                btn.sizePolicy().verticalPolicy()
+            )
+
+            if locked:
+                btn.setIcon(self._lock_icon())
+                from PyQt6.QtCore import QSize
+                btn.setIconSize(QSize(13, 13))
+                btn.setToolTip("Add an API key in My API Key to unlock this feature")
 
             btn.mousePressEvent   = lambda ev, i=pos: self._btn_press(ev, i)
             btn.mouseMoveEvent    = lambda ev, i=pos: self._btn_move(ev, i)
@@ -173,6 +189,40 @@ class DraggableTabBar(QWidget):
 
         self._layout.addStretch()
         self._refresh_checked()
+
+    def _lock_icon(self):
+        """Render a clean SVG padlock as a QIcon — matches current theme color."""
+        from PyQt6.QtSvg import QSvgRenderer
+        from PyQt6.QtGui import QPixmap, QPainter, QIcon, QColor
+        from PyQt6.QtWidgets import QApplication
+        is_dark = getattr(self._mixin, "_dark", False)
+        color = "#aaaaaa" if is_dark else "#888888"
+        svg = (
+            f'<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none">'
+            f'<rect x="2" y="7.5" width="12" height="7.5" rx="1.8" '
+            f'stroke="{color}" stroke-width="1.3"/>'
+            f'<path d="M4.5 7.5V5a3.5 3.5 0 0 1 7 0v2.5" '
+            f'stroke="{color}" stroke-width="1.3" stroke-linecap="round"/>'
+            f'<circle cx="8" cy="11" r="1" fill="{color}"/>'
+            f'</svg>'
+        ).encode()
+        app = QApplication.instance()
+        dpr = app.primaryScreen().devicePixelRatio() if app and app.primaryScreen() else 1.0
+        size = 13
+        phys = int(size * dpr)
+        px = QPixmap(phys, phys)
+        px.fill(QColor(0, 0, 0, 0))
+        renderer = QSvgRenderer(svg)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        renderer.render(p)
+        p.end()
+        px.setDevicePixelRatio(dpr)
+        return QIcon(px)
+
+    def refresh_lock_state(self):
+        """Call after API keys change to update lock icons on tab buttons."""
+        self._rebuild_buttons()
 
     def _refresh_checked(self):
         for pos, canonical in enumerate(self._order):

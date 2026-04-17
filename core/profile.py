@@ -37,8 +37,39 @@ DEFAULT_PROFILE: dict = {
     "api_key_gemini":          "",
     "api_key_claude":          "",
     "api_key_aistudio":        "",
+    "api_key_mistral":         "",
+    "api_key_cohere":          "",
+    "api_key_copilot":         "",
+    "api_key_codewhisperer":   "",
+    "api_key_azure_openai":    "",
     "api_key_deepl":           "",
     "api_key_libretranslate":  "",
+    "api_key_stability":       "",
+    "api_key_elevenlabs":      "",
+    "api_key_harvey":          "",
+    "api_key_casetext":        "",
+    "api_key_lexis":           "",
+    "api_key_azure_health":    "",
+    "api_key_medpalm":         "",
+    "api_key_nuance_dax":      "",
+    "api_key_aws_healthlake":  "",
+    "api_key_autodesk":        "",
+    "api_key_speckle":         "",
+    "api_key_edgeimpulse":     "",
+    "api_key_aws_iot":         "",
+    "api_key_adobe_firefly":   "",
+    "api_key_midjourney":      "",
+    "api_key_runway":          "",
+    "api_key_bloomberg":       "",
+    "api_key_alpaca":          "",
+    "api_key_semantic_scholar":"",
+    "api_key_wolfram":         "",
+    "api_key_jasper":          "",
+    "api_key_copyai":          "",
+    "api_key_elsevier":        "",
+    "api_key_password_hash":   "",
+    "api_recovery_contacts":   "",  # "||"-separated list of emails/phones
+    "usage_stats":             {},  # feature & API usage counters
 }
 
 
@@ -118,9 +149,22 @@ class ProfileManager(QObject):
             # v0 → v1: no structural changes
             # v1 → v2: add tab_order field
             data.setdefault("tab_order", [0, 1, 2, 3, 4, 5])
-            data.setdefault("nav_order", [1, 7, 8, 2])
+            data.setdefault("nav_order", [1, 7, 8, 9, 2])
             for k in ("api_key_openai", "api_key_gemini", "api_key_claude",
-                      "api_key_aistudio", "api_key_deepl", "api_key_libretranslate"):
+                      "api_key_aistudio", "api_key_mistral", "api_key_cohere",
+                      "api_key_copilot", "api_key_codewhisperer", "api_key_azure_openai",
+                      "api_key_deepl", "api_key_libretranslate",
+                      "api_key_stability", "api_key_elevenlabs",
+                      "api_key_harvey", "api_key_casetext", "api_key_lexis",
+                      "api_key_azure_health", "api_key_medpalm",
+                      "api_key_nuance_dax", "api_key_aws_healthlake",
+                      "api_key_autodesk", "api_key_speckle",
+                      "api_key_edgeimpulse", "api_key_aws_iot",
+                      "api_key_adobe_firefly", "api_key_midjourney", "api_key_runway",
+                      "api_key_bloomberg", "api_key_alpaca",
+                      "api_key_semantic_scholar", "api_key_wolfram",
+                      "api_key_jasper", "api_key_copyai", "api_key_elsevier",
+                      "api_key_password_hash", "api_recovery_contacts"):
                 data.setdefault(k, "")
             data["version"] = CURRENT_PROFILE_VERSION
         return data

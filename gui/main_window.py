@@ -94,6 +94,7 @@ from gui.pages.dashboard_mixin import DashboardMixin                    # noqa: 
 from gui.pages.settings_mixin import SettingsMixin                      # noqa: E402
 from gui.pages.overlay_settings_mixin import OverlaySettingsMixin       # noqa: E402
 from gui.pages.api_keys_mixin import ApiKeysMixin                        # noqa: E402
+from gui.pages.analyse_mixin import AnalyseMixin                         # noqa: E402
 from gui.pages.history_mixin import HistoryMixin                        # noqa: E402
 from gui.pages.profile_mixin import ProfileMixin                        # noqa: E402
 from gui.pages.info_pages_mixin import InfoPagesMixin                   # noqa: E402
@@ -102,7 +103,7 @@ from gui.theme_mixin import ThemeMixin                                  # noqa: 
 
 # ══════════════════════════════════════════════════════════════════════════════
 class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
-                 ApiKeysMixin, HistoryMixin, ProfileMixin,
+                 ApiKeysMixin, AnalyseMixin, HistoryMixin, ProfileMixin,
                  InfoPagesMixin, ThemeMixin, QMainWindow):
 
     # ── Signals ────────────────────────────────────────────────────────────────
@@ -196,6 +197,7 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self._content_stack.addWidget(self._build_profile_page())            # 6
         self._content_stack.addWidget(self._build_overlay_settings_page())   # 7
         self._content_stack.addWidget(self._build_api_keys_page())           # 8
+        self._content_stack.addWidget(self._build_analyse_page())            # 9
         row_lay.addWidget(self._content_stack, 1)
 
         root.addWidget(content_row, 1)
@@ -428,17 +430,25 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         return btn
 
     def _navigate(self, page_idx: int):
+        # Leave API keys page — stop inactivity timer
+        if self._content_stack.currentIndex() == 8:
+            self._api_on_page_leave()
+            # Refresh gates in case user just saved a key
+            if page_idx == 0:
+                self._refresh_tab_gates()
+
         self._content_stack.setCurrentIndex(page_idx)
         for btn, idx in self._nav_btns:
             btn.setChecked(idx == page_idx)
         if hasattr(self, "_sidebar_nav"):
             self._sidebar_nav.set_active(page_idx)
-        # Show edit icon only when NOT on the profile page (index 6)
         if self._edit_icon_lbl is not None:
             self._edit_icon_lbl.setVisible(page_idx != 6)
-        # Re-show and re-arm the title fade every time Dashboard is opened
         if page_idx == 0:
             self._restart_dashboard_title_fade()
+        # Enter API keys page — always show lock screen
+        if page_idx == 8:
+            self._api_on_page_enter()
 
     def apply_nav_order(self, order: list):
         if hasattr(self, "_sidebar_nav"):
@@ -548,6 +558,13 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
             self.apply_nav_order(nav_order)
         # Restore API keys
         self.apply_api_keys(profile)
+        # Cache password hash for the lock screen
+        self._api_pw_hash_cache = profile.get("api_key_password_hash", "")
+        # Cache full profile for gate checks
+        self._last_profile_cache = dict(profile)
+        # Refresh tab gates and lock icons whenever profile changes
+        # (covers API key saves, startup, and theme toggles)
+        QTimer.singleShot(0, self._refresh_tab_gates)
 
     def _apply_voice_settings(self, profile: dict):
         """Restore Voice Settings controls and TTS engine state from a profile dict."""
@@ -729,9 +746,10 @@ _NAV_DEFS = [
     ("Voice Setting",   1),
     ("Overlay Setting", 7),
     ("My API Key",      8),
+    ("Analyse",         9),
     ("View History",    2),
 ]
-_DEFAULT_NAV_ORDER = [1, 7, 8, 2]
+_DEFAULT_NAV_ORDER = [1, 7, 8, 9, 2]
 
 
 class _DraggableSidebarNav(QWidget):
