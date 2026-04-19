@@ -90,15 +90,36 @@ def _mac_float_above_all(widget: QWidget):
 
 ASSETS = os.path.join(os.path.dirname(__file__), "..", "assets")
 
-# Geometry constants
-LOGO_SIZE   = 72
-PADDING     = 8
-CIRCLE_SIZE = LOGO_SIZE + PADDING * 2           # 88 px — collapsed width/height
-TEXT_WIDTH  = 240                               # extra width when expanded
+# ── Overlay geometry — scaled to match the system DPI ────────────────────────
+# On Linux with a high-DPI laptop screen the logical DPI is often reported as
+# 96 even though the physical DPI is ~140-160.  Import the same _dpi_scale()
+# helper used by the main window so the pill is the same relative size as the
+# rest of the UI.
+def _overlay_scale() -> float:
+    try:
+        import platform as _p
+        from PyQt6.QtWidgets import QApplication as _QA
+        app = _QA.instance()
+        if app and app.primaryScreen():
+            s = app.primaryScreen()
+            logical  = s.logicalDotsPerInch()  / 96.0
+            physical = s.physicalDotsPerInch() / 96.0
+            if _p.system() == "Linux":
+                return min(max(logical, physical), 1.25)
+            return logical
+    except Exception:
+        pass
+    return 1.0
+
+_S         = _overlay_scale()
+LOGO_SIZE   = round(90  * _S)
+PADDING     = round(10  * _S)
+CIRCLE_SIZE = LOGO_SIZE + PADDING * 2           # collapsed width/height
+TEXT_WIDTH  = round(280 * _S)                   # extra width when expanded
 PILL_HEIGHT = CIRCLE_SIZE                       # height stays constant
 PILL_WIDTH  = CIRCLE_SIZE + TEXT_WIDTH + PADDING  # expanded width
 ANIM_MS     = 220                               # animation duration ms
-DRAG_PX     = 6                                 # drag-detection threshold
+DRAG_PX     = round(6   * _S)                  # drag-detection threshold
 GLOW_MARGIN = 0
 
 # How often (ms) to re-assert the window level while the overlay is visible.
@@ -523,14 +544,22 @@ class OverlayWidget(QWidget):
         """
         Periodically re-assert the window level while the overlay is visible.
 
-        macOS can re-order windows when another app becomes active.
-        Calling _mac_float_above_all every 500 ms guarantees the overlay
-        snaps back to the front within half a second even in edge cases.
+        macOS: calls _mac_float_above_all() every 500 ms.
+        Linux: calls raise_() every 500 ms so the overlay stays above other
+               windows even after focus changes (X11 WMs can re-stack windows
+               when another app becomes active).
         The timer only runs while the overlay is shown.
         """
         self._front_timer = QTimer(self)
         self._front_timer.setInterval(_KEEP_FRONT_INTERVAL_MS)
-        self._front_timer.timeout.connect(lambda: _mac_float_above_all(self))
+
+        def _keep_front():
+            if platform.system() == "Linux":
+                self.raise_()
+            else:
+                _mac_float_above_all(self)
+
+        self._front_timer.timeout.connect(_keep_front)
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -545,15 +574,49 @@ class OverlayWidget(QWidget):
         if auto_show:
             self.show_overlay()
 
+    def _linux_raise_to_front(self):
+        """
+        On Linux (X11 + Wayland) raise_() alone is silently ignored by the
+        window manager when the window has no focus (WA_ShowWithoutActivating).
+
+        The reliable sequence is:
+          1. show()  — make the window visible
+          2. raise_() — hint to Qt's internal stacking
+          3. activateWindow() — ask the WM to bring it to front and give focus
+          4. windowHandle().requestActivate() — Wayland-safe activation request
+
+        We temporarily allow activation (clear WA_ShowWithoutActivating) so the
+        WM honours the request, then restore it so future shows don't steal focus
+        from the user's active app.
+        """
+        if platform.system() != "Linux":
+            return
+        # Temporarily allow activation so the WM honours raise/activate
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        handle = self.windowHandle()
+        if handle:
+            handle.requestActivate()
+        # Restore — subsequent shows won't steal focus from the user's app
+        QTimer.singleShot(200, lambda: self.setAttribute(
+            Qt.WidgetAttribute.WA_ShowWithoutActivating, True))
+
     def show_overlay(self):
         self.show()
         self.raise_()
-        # Call immediately — do NOT delay. The 30 ms delay in the old code
-        # meant the overlay was pushed to the front AFTER the other app had
-        # already claimed focus, so it was immediately covered again.
-        _mac_float_above_all(self)
-        # One extra call after 80 ms as a safety net for the first show.
-        QTimer.singleShot(80, lambda: _mac_float_above_all(self))
+        if platform.system() == "Linux":
+            # raise_() is ignored by Linux WMs when the window has no focus.
+            # Use the full activation sequence instead.
+            self._linux_raise_to_front()
+        else:
+            # Call immediately — do NOT delay. The 30 ms delay in the old code
+            # meant the overlay was pushed to the front AFTER the other app had
+            # already claimed focus, so it was immediately covered again.
+            _mac_float_above_all(self)
+            # One extra call after 80 ms as a safety net for the first show.
+            QTimer.singleShot(80, lambda: _mac_float_above_all(self))
 
     def hide_overlay(self):
         self._collapse()
@@ -764,8 +827,23 @@ class OverlayWidget(QWidget):
     # Mouse events — drag + click
     # ------------------------------------------------------------------ #
 
+    def _is_linux(self) -> bool:
+        return platform.system() == "Linux"
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._is_linux() and not self._label_drag_mode:
+                # On Linux (X11 + Wayland) delegate dragging to the window
+                # manager via startSystemMove().  self.move() alone is
+                # unreliable on X11 and a no-op on Wayland.
+                handle = self.windowHandle()
+                if handle:
+                    handle.startSystemMove()
+                    # Still record press so click-vs-drag detection works on
+                    # mouse release (startSystemMove doesn't block).
+                    self._press_pos = event.globalPosition().toPoint()
+                    self._dragging = False
+                    return
             self._press_pos = event.globalPosition().toPoint()
             self._dragging = False
         elif event.button() == Qt.MouseButton.RightButton:
@@ -782,6 +860,9 @@ class OverlayWidget(QWidget):
                              min(new_pos.y(), screen.bottom() - self.height())))
             self.move(new_pos)
             return
+
+        if self._is_linux():
+            return  # WM handles the move; nothing to do here
 
         if self._press_pos is None:
             return

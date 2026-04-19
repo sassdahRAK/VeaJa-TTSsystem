@@ -67,18 +67,38 @@ def _make_square_pixmap(path: str, size: int) -> QPixmap | None:
 
 def _dpi_scale() -> float:
     """
-    Return a scale factor relative to 96 DPI (Windows baseline).
-    96 DPI  → 1.0   (Windows default)
-    120 DPI → 1.25  (Windows 125%)
-    144 DPI → 1.5   (Windows 150% / typical HiDPI)
-    192 DPI → 2.0   (Retina / 200%)
-    Linux at 96 DPI → 1.0  (same baseline)
+    Return a scale factor for UI sizing.
+
+    Windows / macOS: use logicalDotsPerInch / 96 (OS handles DPI scaling).
+    Linux: Qt reports logical DPI = 96 even on high-DPI laptop screens because
+           most Linux desktops don't set a display scale factor by default.
+           We therefore use physicalDotsPerInch / 96 as a floor so the UI
+           is not tiny on ~140–160 DPI laptop panels.
+
+    Examples:
+      Windows 96 DPI  → 1.0   (normal desktop)
+      Windows 120 DPI → 1.25  (125 % scaling)
+      Linux 96 lDPI / 144 pDPI → max(96/96, 144/96) = 1.5
+      Linux 96 lDPI / 96 pDPI  → 1.0  (external monitor at normal DPI)
     """
     try:
         from PyQt6.QtWidgets import QApplication
+        import platform as _platform
         app = QApplication.instance()
         if app and app.primaryScreen():
-            return app.primaryScreen().logicalDotsPerInch() / 96.0
+            screen = app.primaryScreen()
+            logical  = screen.logicalDotsPerInch()
+            physical = screen.physicalDotsPerInch()
+            logical_scale  = logical  / 96.0
+            physical_scale = physical / 96.0
+            if _platform.system() == "Linux":
+                # On Linux take the larger of the two so high-DPI laptop
+                # screens get a sensible size even without a compositor
+                # scale factor configured.
+                # Cap at 1.25 — beyond that the window becomes too large
+                # for typical 1080p laptop screens.
+                return min(max(logical_scale, physical_scale), 1.25)
+            return logical_scale
     except Exception:
         pass
     return 1.0

@@ -57,6 +57,11 @@ def _is_dark_mode() -> bool:
 
 # ── Drag-to-move title bar ────────────────────────────────────────────────────
 
+def _is_linux() -> bool:
+    import platform as _platform
+    return _platform.system() == "Linux"
+
+
 class _DragBar(QWidget):
     """Title bar widget that handles window drag and double-click to maximize."""
 
@@ -67,9 +72,20 @@ class _DragBar(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if _is_linux():
+                # On Linux (X11 + Wayland) use the native system-move protocol.
+                # startSystemMove() sends _NET_WM_MOVERESIZE on X11 and the
+                # equivalent xdg-shell move request on Wayland, so the window
+                # manager handles the drag — self.move() alone is unreliable.
+                handle = self._win.windowHandle()
+                if handle:
+                    handle.startSystemMove()
+                    return
             self._drag_pos = event.globalPosition().toPoint() - self._win.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event):
+        if _is_linux():
+            return  # system move is handled by the WM; nothing to do here
         if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
             if self._win.isMaximized():
                 # Snap out of maximized before dragging
@@ -175,17 +191,9 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self._title_bar_widget = self._build_title_bar()
         root.addWidget(self._title_bar_widget)
 
-        # Content row: sidebar + pages
-        content_row = QWidget()
-        content_row.setObjectName("contentRow")
-        row_lay = QHBoxLayout(content_row)
-        row_lay.setContentsMargins(0, 0, 0, 0)
-        row_lay.setSpacing(0)
-
+        # Content row: sidebar + pages — use QSplitter so the divider is draggable
         self._sidebar_widget = self._build_sidebar()
-        row_lay.addWidget(self._sidebar_widget)
 
-        # Content stack (pages 0-7)
         self._content_stack = QStackedWidget()
         self._content_stack.setObjectName("contentStack")
         self._content_stack.addWidget(self._build_dashboard_page())          # 0
@@ -198,9 +206,38 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self._content_stack.addWidget(self._build_overlay_settings_page())   # 7
         self._content_stack.addWidget(self._build_api_keys_page())           # 8
         self._content_stack.addWidget(self._build_analyse_page())            # 9
-        row_lay.addWidget(self._content_stack, 1)
 
-        root.addWidget(content_row, 1)
+        from PyQt6.QtWidgets import QSplitter
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setObjectName("mainSplitter")
+        self._splitter.setHandleWidth(4)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.addWidget(self._sidebar_widget)
+        self._splitter.addWidget(self._content_stack)
+        # Sidebar: fixed initial width; content area takes all remaining space
+        self._splitter.setSizes([scaled(240), 9999])
+        # Sidebar minimum 160 px, maximum 400 px; content minimum 400 px
+        self._sidebar_widget.setMinimumWidth(scaled(160))
+        self._sidebar_widget.setMaximumWidth(scaled(400))
+        self._content_stack.setMinimumWidth(scaled(400))
+        # Style the splitter handle to look like the existing divider line
+        self._splitter.setStyleSheet("""
+            QSplitter#mainSplitter::handle {
+                background: transparent;
+                width: 4px;
+            }
+            QSplitter#mainSplitter::handle:hover {
+                background: rgba(128,128,128,0.35);
+            }
+            QSplitter#mainSplitter::handle:pressed {
+                background: rgba(128,128,128,0.55);
+            }
+        """)
+
+        # Resize logo whenever the sidebar width changes
+        self._splitter.splitterMoved.connect(lambda pos, idx: self._resize_sidebar_logo())
+
+        root.addWidget(self._splitter, 1)
 
         # Bottom-right size grip for mouse resize
         grip = QSizeGrip(self)
@@ -304,7 +341,7 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
     def _build_sidebar(self) -> QWidget:
         sb = QWidget()
         sb.setObjectName("sidebar")
-        sb.setFixedWidth(scaled(240))
+        # Width is managed by the QSplitter — no setFixedWidth here
 
         outer = QVBoxLayout(sb)
         outer.setContentsMargins(20, 16, 20, 28)
@@ -326,16 +363,16 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         profile_sec.setSpacing(10)
         profile_sec.setContentsMargins(0, 10, 0, 20)
 
-        # Square photo box
+        # Square photo box — size is computed dynamically from sidebar width
         self._profile_frame = QWidget()
         self._profile_frame.setObjectName("profileFrame")
-        self._profile_frame.setFixedSize(82, 82)
+        # Don't setFixedSize here — _resize_sidebar_logo() handles it
         pf_lay = QVBoxLayout(self._profile_frame)
         pf_lay.setContentsMargins(0, 0, 0, 0)
 
         self._header_logo = QLabel()
-        self._header_logo.setFixedSize(76, 76)
-        self._header_logo.setScaledContents(True)
+        # Don't setFixedSize here — _resize_sidebar_logo() handles it
+        self._header_logo.setScaledContents(False)   # we scale the pixmap ourselves
         self._header_logo.setCursor(Qt.CursorShape.PointingHandCursor)
         self._header_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._header_logo.mousePressEvent = lambda _: self._open_profile_page()
@@ -476,6 +513,33 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
             (screen.width()  - self.width())  // 2,
             (screen.height() - self.height()) // 2,
         )
+
+    def _resize_sidebar_logo(self):
+        """
+        Scale the profile photo / logo in the sidebar to fit the current
+        sidebar width.  Called on splitter drag and on zoom change.
+
+        The logo occupies ~50% of the sidebar width, clamped to [40, 120] px,
+        and is always rendered as a plain square (no corner mask).
+        """
+        if not hasattr(self, "_sidebar_widget") or self._sidebar_widget is None:
+            return
+        if not hasattr(self, "_profile_frame") or self._profile_frame is None:
+            return
+
+        sb_w = self._sidebar_widget.width()
+        if sb_w <= 0:
+            sb_w = 240   # fallback before first paint
+
+        # Logo = 50% of sidebar width, clamped
+        logo_size = max(40, min(120, round(sb_w * 0.50)))
+        frame_size = logo_size + 6   # 3 px padding each side
+
+        self._profile_frame.setFixedSize(frame_size, frame_size)
+        self._header_logo.setFixedSize(logo_size, logo_size)
+
+        # Re-render the pixmap at the new size
+        self._reload_header_logo()
 
     # ════════════════════════════════════════════════════════════════════════ #
     #  PUBLIC API (AppController-compatible)
@@ -723,6 +787,8 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
             self._setup_zoom_shortcuts()
             # Also catch Ctrl+Wheel like VS Code
             QApplication.instance().installEventFilter(self)
+        # Size the logo once the sidebar has a real pixel width
+        QTimer.singleShot(0, self._resize_sidebar_logo)
 
     # ── Zoom (Ctrl++ / Ctrl+- / Ctrl+0) ──────────────────────────────────────
 
@@ -730,6 +796,9 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
     _ZOOM_MIN    = 0.6
     _ZOOM_MAX    = 2.0
     _zoom_factor = 1.0
+    # Stores original fixed constraints per widget id so we always scale
+    # relative to the baseline (100%), not the previous zoom level.
+    _zoom_orig_constraints: dict = {}
 
     def _setup_zoom_shortcuts(self):
         from PyQt6.QtGui import QShortcut, QKeySequence
@@ -737,28 +806,96 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         for seq in ("Ctrl++", "Ctrl+=", "Ctrl+Shift+="):
             s = QShortcut(QKeySequence(seq), self)
             s.setContext(ctx)
-            s.activated.connect(
-                lambda: self._zoom(MainWindow._zoom_factor + self._ZOOM_STEP)
-            )
+            s.activated.connect(self._zoom_in)
         s_minus = QShortcut(QKeySequence("Ctrl+-"), self)
         s_minus.setContext(ctx)
-        s_minus.activated.connect(
-            lambda: self._zoom(MainWindow._zoom_factor - self._ZOOM_STEP)
-        )
+        s_minus.activated.connect(self._zoom_out)
         s_zero = QShortcut(QKeySequence("Ctrl+0"), self)
         s_zero.setContext(ctx)
-        s_zero.activated.connect(lambda: self._zoom(1.0))
+        s_zero.activated.connect(self._zoom_reset)
+
+    def _zoom_in(self):
+        self._zoom(MainWindow._zoom_factor + self._ZOOM_STEP)
+
+    def _zoom_out(self):
+        self._zoom(MainWindow._zoom_factor - self._ZOOM_STEP)
+
+    def _zoom_reset(self):
+        self._zoom(1.0)
+
+    # Widgets whose fixed sizes are purely decorative / icon-sized and should
+    # NOT be scaled (scrollbar handles, tiny separators, grip, etc.)
+    _ZOOM_SKIP_OBJECTS = {
+        "titleBarIcon", "editIcon", "shapeEditIcon", "inlineEdit",
+        "miniPillSvg", "miniPillDark", "miniPillLight",
+        "miniPreviewDark", "miniPreviewLight",
+        "miniTextLight", "miniTextDark", "miniSpeechLight", "miniSpeechDark",
+        "pillLogo", "refreshIcon",
+    }
+
+    def _zoom_snapshot(self):
+        """
+        Capture the original fixed constraints of every widget once,
+        before any zoom has been applied.  Called lazily on first zoom.
+        """
+        store = MainWindow._zoom_orig_constraints
+        for w in self.findChildren(QWidget):
+            wid = id(w)
+            if wid in store:
+                continue
+            obj = w.objectName()
+            if obj in self._ZOOM_SKIP_OBJECTS:
+                store[wid] = None   # sentinel — skip this widget
+                continue
+            min_w, max_w = w.minimumWidth(), w.maximumWidth()
+            min_h, max_h = w.minimumHeight(), w.maximumHeight()
+            fixed_w = min_w if min_w == max_w and min_w > 0 else None
+            fixed_h = min_h if min_h == max_h and min_h > 0 else None
+            if fixed_w is not None or fixed_h is not None:
+                store[wid] = (fixed_w, fixed_h, w)
+            else:
+                store[wid] = None
 
     def _zoom(self, factor: float):
         factor = max(self._ZOOM_MIN, min(self._ZOOM_MAX, round(factor, 2)))
+        if factor == MainWindow._zoom_factor:
+            return
         MainWindow._zoom_factor = factor
-        app = QApplication.instance()
-        if app:
-            new_pt = max(6, round(10.0 * factor))
-            font = app.font()
-            font.setPointSize(new_pt)
-            app.setFont(font)
+
+        # Snapshot original sizes on first zoom
+        if not MainWindow._zoom_orig_constraints:
+            self._zoom_snapshot()
+
+        # ── 1. Scale QSS font-size values ─────────────────────────────────
+        # _apply_theme() reads _zoom_factor and calls _scale_qss_fonts()
         self._apply_theme()
+
+        # ── 2. Scale fixed widget sizes proportionally ────────────────────
+        store = MainWindow._zoom_orig_constraints
+        for wid, entry in store.items():
+            if entry is None:
+                continue
+            orig_w, orig_h, w = entry
+            try:
+                if orig_w is not None and orig_h is not None:
+                    w.setFixedSize(
+                        max(4, round(orig_w * factor)),
+                        max(4, round(orig_h * factor)),
+                    )
+                elif orig_w is not None:
+                    w.setFixedWidth(max(4, round(orig_w * factor)))
+                elif orig_h is not None:
+                    w.setFixedHeight(max(4, round(orig_h * factor)))
+            except RuntimeError:
+                # Widget was deleted — remove from store
+                store[wid] = None
+
+        # ── 3. Force layout recalculation ─────────────────────────────────
+        self.adjustSize()
+        self.update()
+        # Resize logo proportionally to the new zoom level
+        self._resize_sidebar_logo()
+
         pct  = int(factor * 100)
         orig = self.windowTitle().split("  [")[0]
         self.setWindowTitle(f"{orig}  [{pct}%]")
@@ -771,29 +908,34 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 delta = event.angleDelta().y()
                 if delta > 0:
-                    self._zoom(MainWindow._zoom_factor + self._ZOOM_STEP)
+                    self._zoom_in()
                 elif delta < 0:
-                    self._zoom(MainWindow._zoom_factor - self._ZOOM_STEP)
+                    self._zoom_out()
                 return True
 
         # ShortcutOverride fires BEFORE the widget processes the key —
-        # accepting it here prevents QTextEdit from swallowing Ctrl++/-
+        # accepting it here prevents QTextEdit/QLineEdit from swallowing
+        # Ctrl++/-.  KeyPress is the actual zoom trigger on Linux where
+        # QShortcut sometimes misses Ctrl++ / Ctrl+-.
         if event.type() in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress):
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            mods = event.modifiers()
+            if mods & Qt.KeyboardModifier.ControlModifier:
                 key = event.key()
-                if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
+                # Ctrl++ : Key_Plus (numpad) or Key_Equal (US layout, with or
+                # without Shift — physical key is the same on most keyboards)
+                if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
                     if event.type() == QEvent.Type.KeyPress:
-                        self._zoom(MainWindow._zoom_factor + self._ZOOM_STEP)
+                        self._zoom_in()
                     event.accept()
                     return True
                 if key == Qt.Key.Key_Minus:
                     if event.type() == QEvent.Type.KeyPress:
-                        self._zoom(MainWindow._zoom_factor - self._ZOOM_STEP)
+                        self._zoom_out()
                     event.accept()
                     return True
                 if key == Qt.Key.Key_0:
                     if event.type() == QEvent.Type.KeyPress:
-                        self._zoom(1.0)
+                        self._zoom_reset()
                     event.accept()
                     return True
         return False

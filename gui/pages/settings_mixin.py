@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QPainter
 from PyQt6.QtSvg import QSvgRenderer
 
-from gui._window_shared import ASSETS  # noqa: F401
+from gui._window_shared import ASSETS, scaled  # noqa: F401
 from gui.icon_utils import svg_icon
 
 
@@ -48,21 +48,20 @@ class SettingsMixin:
         top = QWidget()
         top.setObjectName("pageTopAction")
         t_lay = QHBoxLayout(top)
-        t_lay.setContentsMargins(32, 14, 32, 10)
+        t_lay.setContentsMargins(scaled(32), scaled(14), scaled(32), scaled(10))
         t_lay.addStretch()
 
-        # Reset button — icon only, themed via _update_settings_reset_icon()
         self._reset_btn = QPushButton()
         self._reset_btn.setObjectName("btnOutline")
-        self._reset_btn.setFixedSize(36, 32)
+        self._reset_btn.setFixedSize(scaled(36), scaled(32))
         self._reset_btn.setToolTip("Reset to defaults")
         self._reset_btn.clicked.connect(self._reset_settings)
         t_lay.addWidget(self._reset_btn)
-        t_lay.addSpacing(8)
+        t_lay.addSpacing(scaled(8))
 
         save_btn = QPushButton("Save")
         save_btn.setObjectName("btnOutline")
-        save_btn.setFixedSize(90, 32)
+        save_btn.setFixedSize(scaled(90), scaled(32))
         save_btn.clicked.connect(self._save_settings)
         t_lay.addWidget(save_btn)
         lay.addWidget(top)
@@ -71,25 +70,24 @@ class SettingsMixin:
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setObjectName("settingsScroll")
-        self._settings_scroll = scroll   # kept so TourOverlay can ensureWidgetVisible
+        self._settings_scroll = scroll
 
         sc = QWidget()
         sc_lay = QVBoxLayout(sc)
-        sc_lay.setContentsMargins(32, 0, 32, 24)
-        sc_lay.setSpacing(14)
+        sc_lay.setContentsMargins(scaled(32), 0, scaled(32), scaled(24))
+        sc_lay.setSpacing(scaled(14))
 
         # ── Mode + Language ───────────────────────────────────────────────
         ml_row = QHBoxLayout()
         ml_row.setSpacing(0)
 
-        # Mode label + checkboxes (stacked label, then horizontal checkboxes)
         mode_block = QVBoxLayout()
-        mode_block.setSpacing(10)
+        mode_block.setSpacing(scaled(10))
         mode_lbl = QLabel("Mode")
         mode_lbl.setObjectName("settingsLabel")
         mode_block.addWidget(mode_lbl)
         chk_row = QHBoxLayout()
-        chk_row.setSpacing(40)
+        chk_row.setSpacing(scaled(40))
         self._online_btn = QCheckBox("Online Mode")
         self._online_btn.setObjectName("settingsCheck")
         self._online_btn.setChecked(True)
@@ -102,7 +100,6 @@ class SettingsMixin:
         chk_row.addStretch()
         mode_block.addLayout(chk_row)
 
-        # Connection status label — updated live by NetworkMonitor
         self._conn_status_lbl = QLabel()
         self._conn_status_lbl.setObjectName("connStatusLbl")
         self._conn_status_lbl.setWordWrap(False)
@@ -113,17 +110,16 @@ class SettingsMixin:
 
         ml_row.addLayout(mode_block, 1)
 
-        # Language — right-aligned, same row
         lang_block = QVBoxLayout()
-        lang_block.setSpacing(10)
+        lang_block.setSpacing(scaled(10))
         lang_lbl = QLabel("Language")
         lang_lbl.setObjectName("settingsLabel")
         lang_block.addWidget(lang_lbl)
         lang_inline = QHBoxLayout()
-        lang_inline.setSpacing(10)
+        lang_inline.setSpacing(scaled(10))
         self._lang_combo = QComboBox()
         self._lang_combo.setObjectName("settingsCombo")
-        self._lang_combo.setFixedWidth(160)
+        self._lang_combo.setFixedWidth(scaled(160))
         for display_name, _ in self._LANG_ITEMS:
             self._lang_combo.addItem(display_name)
         self._lang_combo.currentIndexChanged.connect(self._on_lang_changed)
@@ -138,15 +134,15 @@ class SettingsMixin:
         ss_row.setSpacing(0)
 
         sound_block = QVBoxLayout()
-        sound_block.setSpacing(10)
+        sound_block.setSpacing(scaled(10))
         sound_lbl = QLabel("Sound")
         sound_lbl.setObjectName("settingsLabel")
         sound_block.addWidget(sound_lbl)
         sound_inline = QHBoxLayout()
-        sound_inline.setSpacing(10)
+        sound_inline.setSpacing(scaled(10))
         self._sound_input = QComboBox()
         self._sound_input.setObjectName("settingsCombo")
-        self._sound_input.setFixedWidth(200)
+        self._sound_input.setFixedWidth(scaled(200))
         self._sound_input.currentIndexChanged.connect(self._on_sound_combo_changed)
         sound_inline.addWidget(self._sound_input)
         sound_inline.addWidget(self._inline_edit_icon())
@@ -155,12 +151,12 @@ class SettingsMixin:
         ss_row.addLayout(sound_block, 1)
 
         speed_block = QVBoxLayout()
-        speed_block.setSpacing(10)
+        speed_block.setSpacing(scaled(10))
         speed_lbl = QLabel("Speed")
         speed_lbl.setObjectName("settingsLabel")
         speed_block.addWidget(speed_lbl)
         spd_inline = QHBoxLayout()
-        spd_inline.setSpacing(10)
+        spd_inline.setSpacing(scaled(10))
         spd_inline.addWidget(QLabel("🐢"))
         self._speed_slider = QSlider(Qt.Orientation.Horizontal)
         self._speed_slider.setRange(50, 400)
@@ -198,7 +194,7 @@ class SettingsMixin:
         row = QWidget()
         row_lay = QVBoxLayout(row)
         row_lay.setContentsMargins(0, 0, 0, 0)
-        row_lay.setSpacing(14)
+        row_lay.setSpacing(scaled(14))
 
         chk = QCheckBox(label)
         chk.setObjectName("settingsCheck")
@@ -206,7 +202,7 @@ class SettingsMixin:
         row_lay.addWidget(chk)
 
         previews_row = QHBoxLayout()
-        previews_row.setSpacing(14)
+        previews_row.setSpacing(scaled(14))
         previews_row.addWidget(self._mini_preview(is_circle, dark=True))
         previews_row.addWidget(self._mini_preview(is_circle, dark=False))
         previews_row.addStretch()
@@ -218,16 +214,15 @@ class SettingsMixin:
         from PyQt6.QtSvg import QSvgRenderer
         from PyQt6.QtGui import QPainter
 
-        # SVG native: 219×72 — display at inner width preserving aspect ratio
-        _inner_w = 236
-        _pill_h  = int(_inner_w * 72 / 219)   # ≈ 78px
+        _inner_w = scaled(236)
+        _pill_h  = int(_inner_w * 72 / 219)
 
         card = QWidget()
-        card.setFixedSize(260, _pill_h + 80)
+        card.setFixedSize(scaled(260), _pill_h + scaled(80))
         card.setObjectName("miniPreviewDark" if dark else "miniPreviewLight")
         card_lay = QVBoxLayout(card)
-        card_lay.setContentsMargins(12, 10, 12, 10)
-        card_lay.setSpacing(8)
+        card_lay.setContentsMargins(scaled(12), scaled(10), scaled(12), scaled(10))
+        card_lay.setSpacing(scaled(8))
 
         if is_circle:
             svg_name = "overlay_circle_dark_icon.svg" if dark else "overlay_circle_light_icon.svg"
@@ -239,7 +234,6 @@ class SettingsMixin:
         pill_lbl.setFixedSize(_inner_w, _pill_h)
         pill_lbl.setObjectName("miniPillSvg")
         if os.path.exists(svg_path):
-            # Render SVG → QPixmap so embedded base64 images are resolved
             app_inst = QApplication.instance()
             dpr = app_inst.primaryScreen().devicePixelRatio() if app_inst else 1.0
             phys_w = int(_inner_w * dpr)
@@ -274,7 +268,8 @@ class SettingsMixin:
             ' stroke-linecap="round" stroke-linejoin="round"/>'
             '</svg>'
         )
-        px = QPixmap(13, 13)
+        sz = scaled(13)
+        px = QPixmap(sz, sz)
         px.fill(Qt.GlobalColor.transparent)
         renderer = QSvgRenderer(_svg.encode())
         p = QPainter(px)
@@ -282,7 +277,7 @@ class SettingsMixin:
         p.end()
         lbl = QLabel()
         lbl.setPixmap(px)
-        lbl.setFixedSize(13, 13)
+        lbl.setFixedSize(sz, sz)
         lbl.setObjectName("inlineEdit")
         return lbl
 

@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QPixmap, QPainter
 from PyQt6.QtSvg import QSvgRenderer
 
-from gui._window_shared import ASSETS
+from gui._window_shared import ASSETS, scaled
 from gui.icon_utils import svg_icon
 
 
@@ -33,20 +33,20 @@ class OverlaySettingsMixin:
         top = QWidget()
         top.setObjectName("pageTopAction")
         t_lay = QHBoxLayout(top)
-        t_lay.setContentsMargins(32, 14, 32, 10)
+        t_lay.setContentsMargins(scaled(32), scaled(14), scaled(32), scaled(10))
         t_lay.addStretch()
 
         self._overlay_reset_btn = QPushButton()
         self._overlay_reset_btn.setObjectName("btnOutline")
-        self._overlay_reset_btn.setFixedSize(36, 32)
+        self._overlay_reset_btn.setFixedSize(scaled(36), scaled(32))
         self._overlay_reset_btn.setToolTip("Reset overlay settings to defaults")
         self._overlay_reset_btn.clicked.connect(self._reset_overlay_settings)
         t_lay.addWidget(self._overlay_reset_btn)
-        t_lay.addSpacing(8)
+        t_lay.addSpacing(scaled(8))
 
         save_btn = QPushButton("Save")
         save_btn.setObjectName("btnOutline")
-        save_btn.setFixedSize(90, 32)
+        save_btn.setFixedSize(scaled(90), scaled(32))
         save_btn.clicked.connect(self._save_overlay_settings)
         t_lay.addWidget(save_btn)
         lay.addWidget(top)
@@ -59,8 +59,8 @@ class OverlaySettingsMixin:
 
         sc = QWidget()
         sc_lay = QVBoxLayout(sc)
-        sc_lay.setContentsMargins(32, 0, 32, 24)
-        sc_lay.setSpacing(14)
+        sc_lay.setContentsMargins(scaled(32), 0, scaled(32), scaled(24))
+        sc_lay.setSpacing(scaled(14))
 
         # ── Shape ─────────────────────────────────────────────────────────
         shape_lbl = QLabel("Set overlay shape")
@@ -70,7 +70,7 @@ class OverlaySettingsMixin:
         shape_box = QWidget()
         shape_box.setObjectName("shapeBox")
         sb_lay = QVBoxLayout(shape_box)
-        sb_lay.setContentsMargins(16, 8, 16, 40)
+        sb_lay.setContentsMargins(scaled(16), scaled(8), scaled(16), scaled(40))
         sb_lay.setSpacing(0)
 
         edit_row = QHBoxLayout()
@@ -78,7 +78,7 @@ class OverlaySettingsMixin:
         edit_row.addStretch()
         shape_edit_ic = self._inline_edit_icon()
         shape_edit_ic.setObjectName("shapeEditIcon")
-        shape_edit_ic.setFixedSize(16, 16)
+        shape_edit_ic.setFixedSize(scaled(16), scaled(16))
         edit_row.addWidget(shape_edit_ic)
         sb_lay.addLayout(edit_row)
 
@@ -86,13 +86,12 @@ class OverlaySettingsMixin:
         self._shape_circle = circle_row[0]
         sb_lay.addWidget(circle_row[1])
 
-        sb_lay.addSpacing(20)
+        sb_lay.addSpacing(scaled(20))
 
         rect_row = self._shape_row("Rectangle", is_circle=False, checked=False)
         self._shape_rect = rect_row[0]
         sb_lay.addWidget(rect_row[1])
 
-        # Mutually exclusive
         self._shape_circle.toggled.connect(
             lambda c: self._shape_rect.setChecked(not c) if c else None
         )
@@ -115,8 +114,8 @@ class OverlaySettingsMixin:
         anim_box = QWidget()
         anim_box.setObjectName("shapeBox")
         ab_lay = QVBoxLayout(anim_box)
-        ab_lay.setContentsMargins(16, 12, 16, 16)
-        ab_lay.setSpacing(10)
+        ab_lay.setContentsMargins(scaled(16), scaled(12), scaled(16), scaled(16))
+        ab_lay.setSpacing(scaled(10))
 
         self._anim_spin_chk = QCheckBox("Logo spin while reading")
         self._anim_spin_chk.setObjectName("settingsCheck")

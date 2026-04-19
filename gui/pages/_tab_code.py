@@ -234,6 +234,37 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
     tmp_path = None
     exe_path = None
     try:
+        # ── HTML — write to temp file and open in browser ─────────────────
+        if "html" in lang_lower:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".html", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(code)
+                tmp_path = f.name
+            import webbrowser
+            webbrowser.open(f"file://{tmp_path}")
+            return "✓ Opened in your default browser.", ""
+
+        # ── CSS — wrap in a minimal HTML page and open in browser ─────────
+        if "css" in lang_lower:
+            html_wrapper = (
+                "<!DOCTYPE html><html><head><style>\n"
+                + code +
+                "\n</style></head><body>"
+                "<h1 style='font-family:sans-serif'>CSS Preview</h1>"
+                "<p class='sample'>Sample paragraph</p>"
+                "<button class='sample'>Sample button</button>"
+                "</body></html>"
+            )
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".html", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(html_wrapper)
+                tmp_path = f.name
+            import webbrowser
+            webbrowser.open(f"file://{tmp_path}")
+            return "✓ CSS preview opened in your default browser.", ""
+
         # ── C / C++ — compile then run ────────────────────────────────────
         if lang_lower in ("c", "c++"):
             suffix   = ".c" if lang_lower == "c" else ".cpp"
@@ -244,7 +275,7 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
                 f.write(code)
                 tmp_path = f.name
 
-            exe_path = tmp_path + ".exe"
+            exe_path = tmp_path + ".out"
             compile_result = subprocess.run(
                 [compiler, tmp_path, "-o", exe_path],
                 capture_output=True, text=True, timeout=15
@@ -255,6 +286,54 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
                 [exe_path], capture_output=True, text=True, timeout=10
             )
             return run_result.stdout, run_result.stderr
+
+        # ── Java — compile with javac then run ────────────────────────────
+        if "java" in lang_lower and "javascript" not in lang_lower:
+            # Extract public class name (Java requires filename == class name)
+            import re as _re
+            m = _re.search(r'\bpublic\s+class\s+(\w+)', code)
+            class_name = m.group(1) if m else "Main"
+            tmp_dir = tempfile.mkdtemp()
+            tmp_path = os.path.join(tmp_dir, f"{class_name}.java")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(code)
+            compile_result = subprocess.run(
+                ["javac", tmp_path],
+                capture_output=True, text=True, timeout=20
+            )
+            if compile_result.returncode != 0:
+                return "", f"Compile error:\n{compile_result.stderr}"
+            run_result = subprocess.run(
+                ["java", "-cp", tmp_dir, class_name],
+                capture_output=True, text=True, timeout=10
+            )
+            return run_result.stdout, run_result.stderr
+
+        # ── Swift — compile and run ───────────────────────────────────────
+        if "swift" in lang_lower:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".swift", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(code)
+                tmp_path = f.name
+            result = subprocess.run(
+                ["swift", tmp_path],
+                capture_output=True, text=True, timeout=30
+            )
+            return result.stdout, result.stderr
+
+        # ── Dart / Flutter — run with dart ────────────────────────────────
+        if "dart" in lang_lower or "flutter" in lang_lower:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".dart", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(code)
+                tmp_path = f.name
+            result = subprocess.run(
+                ["dart", "run", tmp_path],
+                capture_output=True, text=True, timeout=30
+            )
+            return result.stdout, result.stderr
 
         # ── SQL — run via sqlite3 (built-in, no install needed) ──────────
         if any(x in lang_lower for x in ("sql", "mysql", "nosql", "mongo")):
@@ -308,7 +387,6 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
             "powershell":      ".ps1",
             "rust":            ".rs",
             "go":              ".go",
-            "java":            ".java",
             "kotlin":          ".kts",
             "php / laravel":   ".php",
             "php":             ".php",
@@ -327,7 +405,7 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
 
         key = lang_lower.split("/")[0].strip()
         suffix = suffix_map.get(key, ".py")
-        runner = runner_map.get(key, [sys.executable])
+        runner = runner_map.get(key)
 
         # Rust needs special compile+run
         if key == "rust":
@@ -336,7 +414,7 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
             ) as f:
                 f.write(code)
                 tmp_path = f.name
-            exe_path = tmp_path + ".exe"
+            exe_path = tmp_path + ".out"
             cr = subprocess.run(
                 ["rustc", tmp_path, "-o", exe_path],
                 capture_output=True, text=True, timeout=30
@@ -345,6 +423,18 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
                 return "", f"Compile error:\n{cr.stderr}"
             rr = subprocess.run([exe_path], capture_output=True, text=True, timeout=10)
             return rr.stdout, rr.stderr
+
+        # React/Next.js/Vue/Angular — treat as plain JS (node)
+        if any(x in key for x in ("react", "next", "vue", "angular")):
+            runner = ["node"]
+            suffix = ".js"
+
+        if runner is None:
+            return "", (
+                f"⚠ No local runner configured for '{lang}'.\n"
+                "This language requires an external runtime to be installed.\n"
+                "Use the 'Ask' button below to get AI help instead."
+            )
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=suffix, delete=False, encoding="utf-8"
@@ -361,7 +451,12 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
     except subprocess.TimeoutExpired:
         return "", "⏱ Execution timed out (10 s limit)."
     except FileNotFoundError as e:
-        return "", f"Runtime not found: {e}\nInstall the required interpreter/compiler."
+        cmd = str(e).split("'")[1] if "'" in str(e) else str(e)
+        return "", (
+            f"⚠ Runtime not found: '{cmd}'\n\n"
+            f"To run {lang} code locally, install the required tool:\n"
+            + _install_hint(lang)
+        )
     except Exception as e:
         return "", str(e)
     finally:
@@ -371,6 +466,29 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
                     os.unlink(p)
             except Exception:
                 pass
+
+
+def _install_hint(lang: str) -> str:
+    """Return a helpful install hint for a missing runtime."""
+    lang_lower = lang.lower()
+    hints = {
+        "java":        "  • Ubuntu/Debian: sudo apt install default-jdk\n  • macOS: brew install openjdk",
+        "kotlin":      "  • Ubuntu/Debian: sudo apt install kotlin\n  • macOS: brew install kotlin",
+        "swift":       "  • Ubuntu: https://swift.org/download\n  • macOS: included with Xcode",
+        "dart":        "  • https://dart.dev/get-dart\n  • macOS: brew install dart",
+        "flutter":     "  • https://flutter.dev/docs/get-started/install",
+        "go":          "  • Ubuntu/Debian: sudo apt install golang\n  • macOS: brew install go",
+        "rust":        "  • All platforms: curl https://sh.rustup.rs | sh",
+        "node":        "  • Ubuntu/Debian: sudo apt install nodejs\n  • macOS: brew install node",
+        "javascript":  "  • Ubuntu/Debian: sudo apt install nodejs\n  • macOS: brew install node",
+        "typescript":  "  • Requires Node.js, then: npm install -g ts-node typescript",
+        "php":         "  • Ubuntu/Debian: sudo apt install php\n  • macOS: brew install php",
+        "powershell":  "  • Ubuntu: https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux",
+    }
+    for key, hint in hints.items():
+        if key in lang_lower:
+            return hint
+    return "  • Install the appropriate runtime for your OS."
 
 
 # ── Tab mixin ─────────────────────────────────────────────────────────────────
@@ -645,6 +763,180 @@ class CodeTabMixin:
                         "purpose": f"Makes '{m.group(1)}' available.",
                         "usage": s, "sample": s,
                     })
+            return items[:30]
+
+        # ── HTML ──────────────────────────────────────────────────────────
+        if "html" in lang_name:
+            for line in code.splitlines():
+                s = line.strip()
+                # Tags
+                m = re.match(r'^<(\w[\w.-]*)([^>]*)>', s)
+                if m:
+                    tag, attrs_str = m.group(1), m.group(2)
+                    if tag.lower() in ("html", "head", "body", "div", "span",
+                                       "p", "h1", "h2", "h3", "ul", "li",
+                                       "a", "img", "form", "input", "button",
+                                       "table", "tr", "td", "th", "script",
+                                       "style", "link", "meta", "nav", "section",
+                                       "article", "header", "footer", "main"):
+                        id_m = re.search(r'id=["\'](\w+)["\']', attrs_str)
+                        cls_m = re.search(r'class=["\']([^"\']+)["\']', attrs_str)
+                        label = id_m.group(1) if id_m else (cls_m.group(1).split()[0] if cls_m else tag)
+                        items.append({
+                            "name": label, "role": f"<{tag}> element",
+                            "syntax": s[:80],
+                            "how": f"The <{tag}> tag defines a {tag} element in the page.",
+                            "purpose": f"Renders a {tag} block in the HTML document.",
+                            "usage": f"<{tag}>{('</' + tag + '>') if tag not in ('img','input','meta','link','br','hr') else ''}",
+                            "sample": f"<!DOCTYPE html>\n<html>\n<body>\n  {s}\n</body>\n</html>",
+                        })
+            if not items:
+                items.append({
+                    "name": "HTML document", "role": "markup",
+                    "syntax": code.splitlines()[0].strip(),
+                    "how": "HTML defines the structure of a web page.",
+                    "purpose": "Rendered by a browser to display content.",
+                    "usage": "Open in a browser.",
+                    "sample": code,
+                })
+            return items[:30]
+
+        # ── CSS ───────────────────────────────────────────────────────────
+        if "css" in lang_name:
+            # Match selectors: .class, #id, element, or combinations
+            for m in re.finditer(r'([.#]?[\w][\w\s,.-]*?)\s*\{([^}]*)\}', code, re.DOTALL):
+                selector = m.group(1).strip()
+                body = m.group(2).strip()
+                props = [p.strip() for p in body.split(";") if ":" in p]
+                prop_names = ", ".join(p.split(":")[0].strip() for p in props[:3])
+                items.append({
+                    "name": selector, "role": "CSS rule",
+                    "syntax": f"{selector} {{ {prop_names}{'…' if len(props) > 3 else ''} }}",
+                    "how": f"Applies styles to elements matching '{selector}'.",
+                    "purpose": f"Sets: {prop_names}.",
+                    "usage": f'<element class="{selector.lstrip(".")}">…</element>',
+                    "sample": (
+                        f"<!DOCTYPE html>\n<html><head><style>\n{selector} {{\n"
+                        + "\n".join(f"  {p};" for p in props) +
+                        f"\n}}\n</style></head><body>\n"
+                        f'<p class="{selector.lstrip(".")}">Styled text</p>\n'
+                        f"</body></html>"
+                    ),
+                })
+            if not items:
+                items.append({
+                    "name": "CSS styles", "role": "stylesheet",
+                    "syntax": code.splitlines()[0].strip(),
+                    "how": "CSS controls the visual presentation of HTML elements.",
+                    "purpose": "Styles the page layout, colours, and typography.",
+                    "usage": "Link via <link rel='stylesheet'> or <style> tag.",
+                    "sample": code,
+                })
+            return items[:30]
+
+        # ── Swift ─────────────────────────────────────────────────────────
+        if "swift" in lang_name:
+            for line in code.splitlines():
+                s = line.strip()
+                m = re.match(r'^(?:public\s+|private\s+|internal\s+|open\s+)?(?:final\s+)?class\s+(\w+)', s)
+                if m:
+                    cname = m.group(1)
+                    items.append({
+                        "name": cname, "role": "class",
+                        "syntax": s, "how": "Defines a Swift class.",
+                        "purpose": f"Blueprint for '{cname}' objects.",
+                        "usage": f"let obj = {cname}()",
+                        "sample": f'class {cname} {{\n    init() {{\n        print("Hello from {cname}")\n    }}\n}}\n\nlet obj = {cname}()',
+                    })
+                    continue
+                m = re.match(r'^struct\s+(\w+)', s)
+                if m:
+                    sname = m.group(1)
+                    items.append({
+                        "name": sname, "role": "struct",
+                        "syntax": s, "how": "Defines a Swift value type.",
+                        "purpose": f"Lightweight data container '{sname}'.",
+                        "usage": f"var s = {sname}()",
+                        "sample": f'struct {sname} {{\n    var value: Int = 0\n}}\n\nvar s = {sname}()\nprint(s.value)',
+                    })
+                    continue
+                m = re.match(r'^(?:func|override func)\s+(\w+)\s*\(([^)]*)\)', s)
+                if m:
+                    fname, params = m.group(1), m.group(2)
+                    items.append({
+                        "name": fname, "role": "function",
+                        "syntax": s, "how": f"Swift function called as {fname}(…).",
+                        "purpose": "Performs a task.", "usage": f"{fname}()",
+                        "sample": f'func {fname}({params}) {{\n    print("{fname} called")\n}}\n\n{fname}()',
+                    })
+                    continue
+                m = re.match(r'^(?:let|var)\s+(\w+)\s*(?::\s*\w+)?\s*=\s*(.+)', s)
+                if m:
+                    vname, val = m.group(1), m.group(2)[:60]
+                    items.append({
+                        "name": vname, "role": "variable / constant",
+                        "syntax": s, "how": "Declares a Swift variable or constant.",
+                        "purpose": f"Stores value: {val}.", "usage": vname,
+                        "sample": f'let {vname} = {val}\nprint({vname})',
+                    })
+            if not items:
+                items.append({
+                    "name": "snippet", "role": "Swift code",
+                    "syntax": code.splitlines()[0].strip(),
+                    "how": "A block of Swift code.", "purpose": "Runs the pasted code.",
+                    "usage": "—", "sample": code,
+                })
+            return items[:30]
+
+        # ── Dart / Flutter ────────────────────────────────────────────────
+        if "dart" in lang_name or "flutter" in lang_name:
+            for line in code.splitlines():
+                s = line.strip()
+                m = re.match(r'^(?:abstract\s+)?class\s+(\w+)', s)
+                if m:
+                    cname = m.group(1)
+                    items.append({
+                        "name": cname, "role": "class",
+                        "syntax": s, "how": "Defines a Dart class.",
+                        "purpose": f"Blueprint for '{cname}' objects.",
+                        "usage": f"var obj = {cname}();",
+                        "sample": f'class {cname} {{\n  {cname}() {{\n    print("Hello from {cname}");\n  }}\n}}\n\nvoid main() {{\n  var obj = {cname}();\n}}',
+                    })
+                    continue
+                m = re.match(r'^(?:void|int|String|bool|double|List|Map|\w+)\s+(\w+)\s*\(([^)]*)\)', s)
+                if m and m.group(1) not in ("if", "while", "for", "switch"):
+                    fname, params = m.group(1), m.group(2)
+                    items.append({
+                        "name": fname, "role": "function",
+                        "syntax": s, "how": f"Dart function called as {fname}(…).",
+                        "purpose": "Performs a task.", "usage": f"{fname}()",
+                        "sample": f'void {fname}({params}) {{\n  print("{fname} called");\n}}\n\nvoid main() {{\n  {fname}();\n}}',
+                    })
+                    continue
+                m = re.match(r'^(?:var|final|const)\s+(\w+)\s*=\s*(.+)', s)
+                if m:
+                    vname, val = m.group(1), m.group(2).rstrip(";")[:60]
+                    items.append({
+                        "name": vname, "role": "variable",
+                        "syntax": s, "how": "Declares a Dart variable.",
+                        "purpose": f"Stores: {val}.", "usage": vname,
+                        "sample": f'void main() {{\n  var {vname} = {val};\n  print({vname});\n}}',
+                    })
+                m = re.match(r'^import\s+[\'"](.+)[\'"]', s)
+                if m:
+                    pkg = m.group(1)
+                    items.append({
+                        "name": pkg.split("/")[-1].replace(".dart", ""), "role": "import",
+                        "syntax": s, "how": f"Imports '{pkg}' package.",
+                        "purpose": f"Makes '{pkg}' available.", "usage": s, "sample": s,
+                    })
+            if not items:
+                items.append({
+                    "name": "snippet", "role": "Dart code",
+                    "syntax": code.splitlines()[0].strip(),
+                    "how": "A block of Dart code.", "purpose": "Runs the pasted code.",
+                    "usage": "—", "sample": code,
+                })
             return items[:30]
 
         # ── JavaScript / TypeScript / React / Vue / Angular / Next.js ─────

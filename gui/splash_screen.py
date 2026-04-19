@@ -43,12 +43,20 @@ class SplashScreen(QWidget):
             Qt.WindowType.SplashScreen
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        self.setFixedSize(860, 540)
+
+        # Scale splash size to match system DPI (important on Linux HiDPI)
+        from gui._window_shared import scaled
+        w = scaled(860)
+        h = scaled(540)
+        logo_px = scaled(320)
+
+        self.setFixedSize(w, h)
         self._center()
 
-        # Pure flat background — no border, no radius, matching role model
         bg         = "#000000" if self._dark else "#ffffff"
         name_color = "#cccccc" if self._dark else "#555555"
+        name_size  = scaled(22)
+        letter_sp  = scaled(6)
 
         self.setStyleSheet(f"background-color: {bg};")
 
@@ -65,12 +73,12 @@ class SplashScreen(QWidget):
         png_name = "logo_light.png" if self._dark else "logo_dark.png"
         png_path = os.path.join(ASSETS, png_name)
         self.logo = QLabel()
-        self.logo.setFixedSize(320, 320)
+        self.logo.setFixedSize(logo_px, logo_px)
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logo.setStyleSheet("background: transparent; border: none;")
         if os.path.exists(png_path):
             px = QPixmap(png_path).scaled(
-                320, 320,
+                logo_px, logo_px,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -78,18 +86,18 @@ class SplashScreen(QWidget):
         else:
             self.logo.setText("V")
             self.logo.setStyleSheet(
-                f"font-size: 120px; font-weight: bold; color: {name_color};"
+                f"font-size: {scaled(120)}px; font-weight: bold; color: {name_color};"
                 f" background: transparent; border: none;"
             )
         centre.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignHCenter)
-        centre.addSpacing(32)
+        centre.addSpacing(scaled(32))
 
-        # App name — simple, light weight, muted colour like role model
+        # App name
         name_lbl = QLabel("Veaja")
         name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_lbl.setStyleSheet(
-            f"color: {name_color}; font-size: 22px;"
-            f" font-weight: 300; letter-spacing: 6px;"
+            f"color: {name_color}; font-size: {name_size}px;"
+            f" font-weight: 300; letter-spacing: {letter_sp}px;"
             f" background: transparent; border: none;"
         )
         centre.addWidget(name_lbl, 0, Qt.AlignmentFlag.AlignHCenter)

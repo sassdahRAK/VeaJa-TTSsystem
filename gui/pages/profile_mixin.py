@@ -351,37 +351,35 @@ QCheckBox#overlayProfileCb::indicator:checked {{
         self.profile_save_requested.emit(dict(self._pending_profile))
 
     def _apply_profile_page_glow(self):
-        """Apply theme-aware blur glow to the large profile photo frame and name input."""
+        """Apply theme-aware glow to the large profile photo frame and name input."""
         if not self._profile_photo_frame:
             return
-        # Dark mode → warm golden glow + border  |  Light mode → soft purple glow only
         if self._dark:
+            # Orange glow, no border, frame bg matches logo PNG black background exactly
             glow_color = QColor("#f5a623")
-            glow_hex   = "#f5a623"
-            bg         = "#111111"
-            border     = f"border: 2px solid {glow_hex};"
+            bg         = "#000000"   # exact match to logo_dark.png background
         else:
-            glow_color = QColor("#7c6fff")
-            glow_hex   = "#7c6fff"
+            glow_color = QColor("#7c6fff")   # soft purple on light bg
             bg         = "#ffffff"
-            border     = "border: none;"
         self._profile_photo_frame.setStyleSheet(
-            f"#profilePhotoFrame {{ background: {bg}; border-radius: 12px; {border} }}"
+            f"#profilePhotoFrame {{ background: {bg}; border-radius: 12px; border: none; }}"
         )
         shadow = QGraphicsDropShadowEffect(self._profile_photo_frame)
-        shadow.setBlurRadius(65)
+        shadow.setBlurRadius(60)
         shadow.setOffset(0, 0)
         shadow.setColor(glow_color)
         self._profile_photo_frame.setGraphicsEffect(shadow)
-        # Name input: transparent background matching content page, underline only
+
+        # Name input — must be transparent so it blends with the page background
         if hasattr(self, "_profile_name_edit"):
-            txt   = "#ffffff" if self._dark else "#1a1a1a"
-            bg_in = "transparent"
+            txt = "#ffffff" if self._dark else "#1a1a1a"
             self._profile_name_edit.setStyleSheet(
                 f"QLineEdit#profileNameEdit {{"
-                f" background: transparent; color: {txt};"
-                f" border: none;"
-                f" font-size: 19px; font-weight: 600; }}"
+                f"  background: transparent;"
+                f"  color: {txt};"
+                f"  border: none;"
+                f"  font-size: 19px; font-weight: 600;"
+                f"}}"
             )
 
     def _reload_profile_page_photo(self):

@@ -27,6 +27,19 @@ if ROOT not in sys.path:
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
 os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
+# ── Linux: force XCB (X11/XWayland) backend ─────────────────────────────────
+# The native Wayland Qt plugin does NOT support:
+#   • WA_TranslucentBackground (overlay transparency)
+#   • WindowStaysOnTopHint     (overlay always-on-top)
+#   • window.move()            (overlay/main window positioning)
+#   • raise_() / activateWindow() (bringing overlay to front on Ctrl+C)
+#
+# XWayland provides full X11 compatibility on Wayland desktops, so we force
+# Qt to use the xcb plugin on Linux unless the user has explicitly overridden
+# QT_QPA_PLATFORM themselves.
+if platform.system() == "Linux":
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 
