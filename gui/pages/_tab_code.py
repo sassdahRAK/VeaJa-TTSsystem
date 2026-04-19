@@ -1,4 +1,4 @@
-"""gui/pages/_tab_code.py — Code analysis tab for the Dashboard (IDE mode)."""
+﻿"""gui/pages/_tab_code.py — Code analysis tab for the Dashboard (IDE mode)."""
 
 import re
 import subprocess
@@ -11,8 +11,203 @@ from PyQt6.QtWidgets import (
     QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QScrollArea, QFrame, QComboBox, QSplitter
 )
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QObject, QRegularExpression
+from PyQt6.QtGui import (
+    QFont, QColor, QSyntaxHighlighter, QTextCharFormat, QTextDocument, QKeySequence, QShortcut
+)
+
+
+# ── Universal syntax highlighter ─────────────────────────────────────────────
+
+def _fmt(color: str, bold: bool = False, italic: bool = False) -> QTextCharFormat:
+    f = QTextCharFormat()
+    f.setForeground(QColor(color))
+    if bold:   f.setFontWeight(700)
+    if italic: f.setFontItalic(True)
+    return f
+
+# VS Code Dark+ palette
+_C = {
+    "kw":      _fmt("#569cd6", bold=True),   # blue   — keywords
+    "fn":      _fmt("#dcdcaa"),              # yellow — functions/builtins
+    "str":     _fmt("#ce9178"),              # orange — strings
+    "com":     _fmt("#6a9955", italic=True), # green  — comments
+    "num":     _fmt("#b5cea8"),              # light green — numbers
+    "dec":     _fmt("#c586c0"),              # purple — decorators/annotations
+    "cls":     _fmt("#4ec9b0", bold=True),   # teal   — class names
+    "self":    _fmt("#9cdcfe"),              # light blue — self/this
+    "tag":     _fmt("#569cd6"),              # blue   — HTML tags
+    "attr":    _fmt("#9cdcfe"),              # light blue — HTML attributes
+    "prop":    _fmt("#9cdcfe"),              # light blue — CSS properties
+    "val":     _fmt("#ce9178"),              # orange — CSS values
+    "type":    _fmt("#4ec9b0"),              # teal   — types
+    "op":      _fmt("#d4d4d4"),              # default — operators
+}
+
+def _rules_for_lang(lang: str) -> list[tuple[str, QTextCharFormat]]:
+    """Return (pattern, format) rules for the given language family."""
+
+    # ── C-family (JS, TS, Java, C, C++, Kotlin, Swift, Dart, Go, Rust, PHP) ──
+    C_KW = (
+        "abstract|as|async|await|break|case|catch|class|const|continue|"
+        "debugger|default|delete|do|else|enum|export|extends|false|finally|"
+        "for|from|function|if|implements|import|in|instanceof|interface|"
+        "let|new|null|of|override|package|private|protected|public|"
+        "return|static|super|switch|this|throw|true|try|typeof|"
+        "undefined|var|void|while|with|yield|"
+        # Java/Kotlin/Swift/Dart extras
+        "fun|val|var|when|where|init|companion|object|data|sealed|"
+        "open|internal|inline|reified|suspend|operator|infix|"
+        "guard|defer|struct|protocol|extension|typealias|"
+        "final|abstract|native|synchronized|transient|volatile|"
+        # Go/Rust extras
+        "chan|go|goroutine|map|range|select|type|package|"
+        "fn|let|mut|impl|trait|use|mod|pub|crate|self|super|"
+        "match|loop|move|ref|where|dyn|unsafe|extern|"
+        # PHP extras
+        "echo|print|include|require|namespace|use|trait|yield|"
+        "array|list|foreach|endforeach|endfor|endwhile|endif|"
+        "elseif|declare|enddeclare|endswitch"
+    )
+    C_BUILTIN = (
+        "console|Math|JSON|Object|Array|String|Number|Boolean|"
+        "Promise|setTimeout|setInterval|fetch|document|window|"
+        "parseInt|parseFloat|isNaN|isFinite|encodeURI|decodeURI|"
+        "print|println|printf|sprintf|strlen|count|array_map|"
+        "System|println|print|fmt|Println|Printf|Sprintf|"
+        "println!|vec!|format!|panic!|assert!|todo!|unimplemented!"
+    )
+    c_rules = [
+        (r"//[^\n]*",                          _C["com"]),   # // comment
+        (r"/\*.*?\*/",                         _C["com"]),   # /* block */
+        (r"#[^\n]*",                           _C["com"]),   # # comment (PHP/Swift)
+        (rf"\b({C_KW})\b",                     _C["kw"]),
+        (rf"\b({C_BUILTIN})\b",                _C["fn"]),
+        (r"\b(this|self|super)\b",             _C["self"]),
+        (r"\bclass\s+(\w+)",                   _C["cls"]),
+        (r"\bfun\s+(\w+)",                     _C["fn"]),
+        (r"\bfn\s+(\w+)",                      _C["fn"]),
+        (r"\bfunction\s+(\w+)",                _C["fn"]),
+        (r"\bdef\s+(\w+)",                     _C["fn"]),
+        (r"@\w+",                              _C["dec"]),   # annotations
+        (r"\b\d+\.?\d*([eE][+-]?\d+)?\b",     _C["num"]),
+        (r'"[^"\\]*(\\.[^"\\]*)*"',            _C["str"]),
+        (r"'[^'\\]*(\\.[^'\\]*)*'",            _C["str"]),
+        (r"`[^`]*`",                           _C["str"]),   # template literals
+    ]
+
+    # ── Python ────────────────────────────────────────────────────────────────
+    PY_KW = (
+        "False|None|True|and|as|assert|async|await|break|class|continue|"
+        "def|del|elif|else|except|finally|for|from|global|if|import|in|is|"
+        "lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield"
+    )
+    PY_BI = (
+        "print|len|range|type|int|str|float|list|dict|set|tuple|bool|"
+        "open|input|super|enumerate|zip|map|filter|sorted|reversed|"
+        "any|all|min|max|sum|abs|round|isinstance|hasattr|getattr|"
+        "setattr|staticmethod|classmethod|property|object"
+    )
+    py_rules = [
+        (r"#[^\n]*",                           _C["com"]),
+        (r'""".*?"""',                         _C["str"]),
+        (r"'''.*?'''",                         _C["str"]),
+        (rf"\b({PY_KW})\b",                    _C["kw"]),
+        (r"\b(self|cls)\b",                    _C["self"]),
+        (r"\bclass\s+(\w+)",                   _C["cls"]),
+        (r"\bdef\s+(\w+)",                     _C["fn"]),
+        (rf"\b({PY_BI})\b",                    _C["fn"]),
+        (r"@\w+",                              _C["dec"]),
+        (r"\b\d+\.?\d*([eE][+-]?\d+)?\b",     _C["num"]),
+        (r'"[^"\\]*(\\.[^"\\]*)*"',            _C["str"]),
+        (r"'[^'\\]*(\\.[^'\\]*)*'",            _C["str"]),
+    ]
+
+    # ── HTML ──────────────────────────────────────────────────────────────────
+    html_rules = [
+        (r"<!--.*?-->",                        _C["com"]),
+        (r"</?(\w[\w.-]*)",                    _C["tag"]),
+        (r'\b(\w+)\s*=',                       _C["attr"]),
+        (r'"[^"]*"',                           _C["str"]),
+        (r"'[^']*'",                           _C["str"]),
+        (r"&\w+;",                             _C["dec"]),
+    ]
+
+    # ── CSS ───────────────────────────────────────────────────────────────────
+    css_rules = [
+        (r"/\*.*?\*/",                         _C["com"]),
+        (r"[.#][\w-]+",                        _C["cls"]),
+        (r"[\w-]+\s*:",                        _C["prop"]),
+        (r":\s*[^;{]+",                        _C["val"]),
+        (r'"[^"]*"',                           _C["str"]),
+        (r"'[^']*'",                           _C["str"]),
+        (r"#[0-9a-fA-F]{3,8}\b",              _C["num"]),
+        (r"\b\d+\.?\d*(px|em|rem|%|vh|vw|pt|s|ms)?\b", _C["num"]),
+    ]
+
+    # ── SQL ───────────────────────────────────────────────────────────────────
+    SQL_KW = (
+        "SELECT|FROM|WHERE|INSERT|INTO|VALUES|UPDATE|SET|DELETE|"
+        "CREATE|TABLE|DROP|ALTER|ADD|COLUMN|INDEX|PRIMARY|KEY|"
+        "FOREIGN|REFERENCES|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|"
+        "GROUP|BY|ORDER|HAVING|LIMIT|OFFSET|DISTINCT|ALL|UNION|"
+        "AND|OR|NOT|IN|LIKE|BETWEEN|IS|NULL|EXISTS|CASE|WHEN|"
+        "THEN|ELSE|END|BEGIN|COMMIT|ROLLBACK|TRANSACTION|"
+        "DATABASE|USE|SHOW|DESCRIBE|EXPLAIN|GRANT|REVOKE"
+    )
+    sql_rules = [
+        (r"--[^\n]*",                          _C["com"]),
+        (r"/\*.*?\*/",                         _C["com"]),
+        (rf"\b({SQL_KW})\b",                   _C["kw"]),
+        (r"'[^']*'",                           _C["str"]),
+        (r'"[^"]*"',                           _C["str"]),
+        (r"\b\d+\.?\d*\b",                     _C["num"]),
+        (r"\b\w+\s*\(",                        _C["fn"]),
+    ]
+
+    # ── Dispatch ──────────────────────────────────────────────────────────────
+    lang_lower = lang.lower()
+    if any(x in lang_lower for x in ("python", "django", "fastapi")):
+        return py_rules
+    if "html" in lang_lower:
+        return html_rules
+    if "css" in lang_lower:
+        return css_rules
+    if any(x in lang_lower for x in ("sql", "nosql", "mongo", "mysql")):
+        return sql_rules
+    # Everything else (JS, TS, Java, C, C++, Kotlin, Swift, Dart, Go, Rust,
+    # PHP, Ruby, React, Vue, Angular, Flutter, Laravel, Next, Spring, ASP…)
+    return c_rules
+
+
+class _CodeHighlighter(QSyntaxHighlighter):
+    """Universal VS Code-style syntax highlighter — adapts to any language."""
+
+    def __init__(self, document: QTextDocument, lang: str = "Python"):
+        super().__init__(document)
+        self._rules: list[tuple[QRegularExpression, QTextCharFormat]] = [
+            (QRegularExpression(p), f) for p, f in _rules_for_lang(lang)
+        ]
+
+    def set_language(self, lang: str):
+        self._rules = [
+            (QRegularExpression(p), f) for p, f in _rules_for_lang(lang)
+        ]
+        self.rehighlight()
+
+    def highlightBlock(self, text: str):
+        for regex, fmt in self._rules:
+            it = regex.globalMatch(text)
+            while it.hasNext():
+                m = it.next()
+                start  = m.capturedStart(1) if m.lastCapturedIndex() >= 1 else m.capturedStart()
+                length = m.capturedLength(1) if m.lastCapturedIndex() >= 1 else m.capturedLength()
+                if start >= 0:
+                    self.setFormat(start, length, fmt)
+
+
+# Keep old name working
+_PythonHighlighter = _CodeHighlighter
 
 
 # ── Background runner ─────────────────────────────────────────────────────────
@@ -35,19 +230,121 @@ class _RunThread(QThread):
 
 def _execute_code(code: str, lang: str) -> tuple[str, str]:
     """Run code locally in a temp file. Returns (stdout, stderr)."""
+    lang_lower = lang.lower()
+    tmp_path = None
+    exe_path = None
     try:
+        # ── C / C++ — compile then run ────────────────────────────────────
+        if lang_lower in ("c", "c++"):
+            suffix   = ".c" if lang_lower == "c" else ".cpp"
+            compiler = "gcc" if lang_lower == "c" else "g++"
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=suffix, delete=False, encoding="utf-8"
+            ) as f:
+                f.write(code)
+                tmp_path = f.name
+
+            exe_path = tmp_path + ".exe"
+            compile_result = subprocess.run(
+                [compiler, tmp_path, "-o", exe_path],
+                capture_output=True, text=True, timeout=15
+            )
+            if compile_result.returncode != 0:
+                return "", f"Compile error:\n{compile_result.stderr}"
+            run_result = subprocess.run(
+                [exe_path], capture_output=True, text=True, timeout=10
+            )
+            return run_result.stdout, run_result.stderr
+
+        # ── SQL — run via sqlite3 (built-in, no install needed) ──────────
+        if any(x in lang_lower for x in ("sql", "mysql", "nosql", "mongo")):
+            # Wrap the SQL in a Python sqlite3 script and run it
+            py_runner = (
+                "import sqlite3, sys\n"
+                "conn = sqlite3.connect(':memory:')\n"
+                "cur = conn.cursor()\n"
+                "sql = '''" + code.replace("'", "\\'") + "'''\n"
+                "try:\n"
+                "    cur.executescript(sql)\n"
+                "    # Try to fetch results from last SELECT\n"
+                "    stmts = [s.strip() for s in sql.split(';') if s.strip()]\n"
+                "    for stmt in reversed(stmts):\n"
+                "        if stmt.upper().startswith('SELECT'):\n"
+                "            cur.execute(stmt)\n"
+                "            rows = cur.fetchall()\n"
+                "            if rows:\n"
+                "                cols = [d[0] for d in cur.description]\n"
+                "                print(' | '.join(cols))\n"
+                "                print('-' * 40)\n"
+                "                for r in rows:\n"
+                "                    print(' | '.join(str(x) for x in r))\n"
+                "            else:\n"
+                "                print('(no rows returned)')\n"
+                "            break\n"
+                "    else:\n"
+                "        print('OK — statement executed successfully.')\n"
+                "except Exception as e:\n"
+                "    print(f'Error: {e}', file=sys.stderr)\n"
+                "finally:\n"
+                "    conn.close()\n"
+            )
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(py_runner)
+                tmp_path = f.name
+            result = subprocess.run(
+                [sys.executable, tmp_path],
+                capture_output=True, text=True, timeout=10
+            )
+            return result.stdout, result.stderr
+
+        # ── All other languages ───────────────────────────────────────────
         suffix_map = {
-            "Python":     ".py",
-            "JavaScript": ".js",
-            "Bash":       ".sh",
+            "python":          ".py",
+            "javascript":      ".js",
+            "typescript":      ".ts",
+            "bash":            ".sh",
+            "powershell":      ".ps1",
+            "rust":            ".rs",
+            "go":              ".go",
+            "java":            ".java",
+            "kotlin":          ".kts",
+            "php / laravel":   ".php",
+            "php":             ".php",
         }
         runner_map = {
-            "Python":     [sys.executable],
-            "JavaScript": ["node"],
-            "Bash":       ["bash"],
+            "python":          [sys.executable],
+            "javascript":      ["node"],
+            "typescript":      ["npx", "ts-node"],
+            "bash":            ["bash"],
+            "powershell":      ["powershell", "-File"],
+            "php / laravel":   ["php"],
+            "php":             ["php"],
+            "kotlin":          ["kotlinc", "-script"],
+            "go":              ["go", "run"],
         }
-        suffix = suffix_map.get(lang, ".py")
-        runner = runner_map.get(lang, [sys.executable])
+
+        key = lang_lower.split("/")[0].strip()
+        suffix = suffix_map.get(key, ".py")
+        runner = runner_map.get(key, [sys.executable])
+
+        # Rust needs special compile+run
+        if key == "rust":
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".rs", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(code)
+                tmp_path = f.name
+            exe_path = tmp_path + ".exe"
+            cr = subprocess.run(
+                ["rustc", tmp_path, "-o", exe_path],
+                capture_output=True, text=True, timeout=30
+            )
+            if cr.returncode != 0:
+                return "", f"Compile error:\n{cr.stderr}"
+            rr = subprocess.run([exe_path], capture_output=True, text=True, timeout=10)
+            return rr.stdout, rr.stderr
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=suffix, delete=False, encoding="utf-8"
@@ -60,17 +357,20 @@ def _execute_code(code: str, lang: str) -> tuple[str, str]:
             capture_output=True, text=True, timeout=10
         )
         return result.stdout, result.stderr
+
     except subprocess.TimeoutExpired:
         return "", "⏱ Execution timed out (10 s limit)."
     except FileNotFoundError as e:
-        return "", f"Runtime not found: {e}\nInstall the required interpreter."
+        return "", f"Runtime not found: {e}\nInstall the required interpreter/compiler."
     except Exception as e:
         return "", str(e)
     finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        for p in [tmp_path, exe_path]:
+            try:
+                if p and os.path.exists(p):
+                    os.unlink(p)
+            except Exception:
+                pass
 
 
 # ── Tab mixin ─────────────────────────────────────────────────────────────────
@@ -112,7 +412,23 @@ class CodeTabMixin:
         self._code_lang = QComboBox()
         self._code_lang.setObjectName("translateCombo")
         self._code_lang.setFixedHeight(28)
-        for lang in ["Python", "JavaScript", "Bash"]:
+        self._code_lang.setMinimumWidth(160)
+        for lang in [
+            # Web
+            "JavaScript", "TypeScript", "HTML", "CSS",
+            # Backend / frameworks
+            "Python", "PHP / Laravel", "Java", "Kotlin",
+            # Mobile
+            "Swift", "Dart / Flutter",
+            # Systems
+            "C", "C++", "Rust", "Go",
+            # Scripting
+            "Bash", "PowerShell",
+            # Data
+            "SQL / MySQL", "NoSQL / MongoDB",
+            # Full-stack frameworks (highlight as JS/TS)
+            "React / Next.js", "Vue", "Angular",
+        ]:
             self._code_lang.addItem(lang)
         in_hdr.addWidget(self._code_lang)
 
@@ -130,6 +446,11 @@ class CodeTabMixin:
         mono = QFont("Consolas", 10)
         mono.setStyleHint(QFont.StyleHint.Monospace)
         self._code_input.setFont(mono)
+        self._code_highlighter = _CodeHighlighter(self._code_input.document(), "Python")
+        # Re-highlight when language changes
+        self._code_lang.currentTextChanged.connect(
+            lambda lang: self._code_highlighter.set_language(lang)
+        )
         lay.addWidget(self._code_input)
 
         # Action row
@@ -205,7 +526,288 @@ class CodeTabMixin:
         self._code_grid_lbl.setVisible(True)
 
     def _extract_code_items(self, code: str) -> list[dict]:
+        lang = getattr(self, "_code_lang", None)
+        lang_name = lang.currentText().lower() if lang else "python"
         items: list[dict] = []
+
+        # ── C / C++ ───────────────────────────────────────────────────────
+        if any(x in lang_name for x in ("c++", "c", "cpp")):
+            for line in code.splitlines():
+                s = line.strip()
+                # #include
+                m = re.match(r'^#include\s*[<"](.+?)[>"]', s)
+                if m:
+                    lib = m.group(1)
+                    items.append({
+                        "name": lib, "role": "include / header",
+                        "syntax": s,
+                        "how": f"Includes the '{lib}' standard library header.",
+                        "purpose": f"Gives access to functions/classes in <{lib}>.",
+                        "usage": s,
+                        "sample": f'#include <{lib}>\n\nint main() {{\n    // use {lib} here\n    return 0;\n}}',
+                    })
+                    continue
+                # function definition  e.g.  int main() {  or  void foo(int x) {
+                m = re.match(r'^(?:[\w:*&<>]+\s+)+(\w+)\s*\(([^)]*)\)\s*(?:const\s*)?\{?', s)
+                if m and m.group(1) not in ("if", "while", "for", "switch", "catch"):
+                    fname, params = m.group(1), m.group(2).strip()
+                    items.append({
+                        "name": fname, "role": "function",
+                        "syntax": s.rstrip("{").strip(),
+                        "how": f"Callable block — call as {fname}(…).",
+                        "purpose": "Performs a specific task.",
+                        "usage": f"{fname}({params})",
+                        "sample": (
+                            f'#include <iostream>\nusing namespace std;\n\n'
+                            f'int {fname}() {{\n    // TODO\n    return 0;\n}}\n\n'
+                            f'int main() {{\n    {fname}();\n    return 0;\n}}'
+                        ),
+                    })
+                    continue
+                # class
+                m = re.match(r'^class\s+(\w+)', s)
+                if m:
+                    cname = m.group(1)
+                    items.append({
+                        "name": cname, "role": "class",
+                        "syntax": f"class {cname} {{ … }};",
+                        "how": "Defines a C++ class — blueprint for objects.",
+                        "purpose": f"Encapsulates data and methods as '{cname}'.",
+                        "usage": f"{cname} obj;",
+                        "sample": (
+                            f'#include <iostream>\nusing namespace std;\n\n'
+                            f'class {cname} {{\npublic:\n    void hello() {{\n'
+                            f'        cout << "Hello from {cname}" << endl;\n    }}\n}};\n\n'
+                            f'int main() {{\n    {cname} obj;\n    obj.hello();\n    return 0;\n}}'
+                        ),
+                    })
+                    continue
+                # cout / printf statement — treat as a runnable snippet
+                if re.search(r'cout\s*<<|printf\s*\(|std::cout', s):
+                    items.append({
+                        "name": "output statement", "role": "statement",
+                        "syntax": s,
+                        "how": "Prints output to the console.",
+                        "purpose": "Displays a value or message.",
+                        "usage": s,
+                        "sample": (
+                            f'#include <iostream>\nusing namespace std;\n\n'
+                            f'int main() {{\n    {s}\n    return 0;\n}}'
+                        ),
+                    })
+                    continue
+            # If nothing matched, wrap the whole snippet as one runnable item
+            if not items:
+                items.append({
+                    "name": "snippet", "role": "code block",
+                    "syntax": code.splitlines()[0].strip(),
+                    "how": "A block of C++ code.",
+                    "purpose": "Runs the pasted code.",
+                    "usage": "—",
+                    "sample": (
+                        f'#include <iostream>\nusing namespace std;\n\n'
+                        f'int main() {{\n    {code.strip()}\n    return 0;\n}}'
+                        if "main" not in code else code
+                    ),
+                })
+            return items[:30]
+
+        # ── Java / Kotlin ─────────────────────────────────────────────────
+        if any(x in lang_name for x in ("java", "kotlin")):
+            for line in code.splitlines():
+                s = line.strip()
+                m = re.match(r'^(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:final\s+)?class\s+(\w+)', s)
+                if m:
+                    cname = m.group(1)
+                    items.append({
+                        "name": cname, "role": "class",
+                        "syntax": s, "how": "Defines a Java/Kotlin class.",
+                        "purpose": f"Blueprint for '{cname}' objects.",
+                        "usage": f"{cname} obj = new {cname}();",
+                        "sample": f'public class {cname} {{\n    public static void main(String[] args) {{\n        System.out.println("Hello from {cname}");\n    }}\n}}',
+                    })
+                    continue
+                m = re.match(r'^(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:\w+\s+)+(\w+)\s*\(([^)]*)\)', s)
+                if m and m.group(1) not in ("if", "while", "for", "switch"):
+                    fname = m.group(1)
+                    items.append({
+                        "name": fname, "role": "method",
+                        "syntax": s, "how": f"Method called as {fname}(…).",
+                        "purpose": "Performs a task.", "usage": f"{fname}()",
+                        "sample": s,
+                    })
+                    continue
+                m = re.match(r'^import\s+(.+);?', s)
+                if m:
+                    items.append({
+                        "name": m.group(1).split(".")[-1], "role": "import",
+                        "syntax": s, "how": "Imports a Java package/class.",
+                        "purpose": f"Makes '{m.group(1)}' available.",
+                        "usage": s, "sample": s,
+                    })
+            return items[:30]
+
+        # ── JavaScript / TypeScript / React / Vue / Angular / Next.js ─────
+        if any(x in lang_name for x in ("javascript", "typescript", "react", "vue", "angular", "next")):
+            for line in code.splitlines():
+                s = line.strip()
+                m = re.match(r'^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)', s)
+                if m:
+                    fname, params = m.group(1), m.group(2)
+                    items.append({
+                        "name": fname, "role": "function",
+                        "syntax": s, "how": f"JS function called as {fname}(…).",
+                        "purpose": "Performs a task.", "usage": f"{fname}()",
+                        "sample": f'function {fname}({params}) {{\n    console.log("{fname} called");\n}}\n\n{fname}();',
+                    })
+                    continue
+                m = re.match(r'^(?:export\s+)?(?:default\s+)?class\s+(\w+)', s)
+                if m:
+                    cname = m.group(1)
+                    items.append({
+                        "name": cname, "role": "class",
+                        "syntax": s, "how": "ES6 class definition.",
+                        "purpose": f"Blueprint for '{cname}'.",
+                        "usage": f"const obj = new {cname}();",
+                        "sample": f'class {cname} {{\n    constructor() {{\n        console.log("{cname} created");\n    }}\n}}\n\nconst obj = new {cname}();',
+                    })
+                    continue
+                m = re.match(r'^(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>', s)
+                if m:
+                    fname, params = m.group(1), m.group(2)
+                    items.append({
+                        "name": fname, "role": "arrow function",
+                        "syntax": s, "how": "Arrow function expression.",
+                        "purpose": f"Callable as {fname}(…).",
+                        "usage": f"{fname}()",
+                        "sample": f'const {fname} = ({params}) => {{\n    console.log("{fname} called");\n}};\n\n{fname}();',
+                    })
+                    continue
+                m = re.match(r'^import\s+.+\s+from\s+[\'"](.+)[\'"]', s)
+                if m:
+                    mod = m.group(1)
+                    items.append({
+                        "name": mod, "role": "import",
+                        "syntax": s, "how": f"Imports from '{mod}'.",
+                        "purpose": f"Makes '{mod}' exports available.",
+                        "usage": s, "sample": s,
+                    })
+            return items[:30]
+
+        # ── SQL / MySQL / NoSQL ───────────────────────────────────────────
+        if any(x in lang_name for x in ("sql", "mysql", "nosql", "mongo")):
+            full_code = code.strip()
+            # Split on semicolons to get individual statements
+            statements = [s.strip() for s in re.split(r';', full_code) if s.strip()]
+            if not statements:
+                statements = [full_code]
+            for stmt in statements:
+                first_line = stmt.splitlines()[0].strip().upper()
+                # Detect statement type
+                m_create = re.match(r'CREATE\s+TABLE\s+(\w+)', stmt, re.IGNORECASE)
+                m_select = re.match(r'SELECT\s+.+\s+FROM\s+(\w+)', stmt, re.IGNORECASE)
+                m_insert = re.match(r'INSERT\s+INTO\s+(\w+)', stmt, re.IGNORECASE)
+                m_update = re.match(r'UPDATE\s+(\w+)', stmt, re.IGNORECASE)
+                m_delete = re.match(r'DELETE\s+FROM\s+(\w+)', stmt, re.IGNORECASE)
+                m_alter  = re.match(r'ALTER\s+TABLE\s+(\w+)', stmt, re.IGNORECASE)
+                m_drop   = re.match(r'DROP\s+TABLE\s+(\w+)', stmt, re.IGNORECASE)
+
+                if m_create:
+                    tname = m_create.group(1)
+                    items.append({
+                        "name": tname, "role": "CREATE TABLE",
+                        "syntax": stmt.splitlines()[0],
+                        "how": f"Creates a new table '{tname}' in the database.",
+                        "purpose": f"Defines the schema/structure for '{tname}'.",
+                        "usage": f"CREATE TABLE {tname} (...);",
+                        "sample": (
+                            f"import sqlite3\nconn = sqlite3.connect(':memory:')\ncur = conn.cursor()\n"
+                            f"cur.executescript(\"\"\"\n{stmt};\n\"\"\")\n"
+                            f"cur.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")\n"
+                            f"print('Tables:', cur.fetchall())\nconn.close()"
+                        ),
+                    })
+                elif m_select:
+                    tname = m_select.group(1)
+                    items.append({
+                        "name": tname, "role": "SELECT query",
+                        "syntax": stmt.splitlines()[0],
+                        "how": "Retrieves rows from a table.",
+                        "purpose": f"Fetches data from '{tname}'.",
+                        "usage": stmt,
+                        "sample": (
+                            f"import sqlite3\nconn = sqlite3.connect(':memory:')\ncur = conn.cursor()\n"
+                            f"cur.execute(\"CREATE TABLE IF NOT EXISTS {tname} (id INTEGER PRIMARY KEY, name TEXT)\")\n"
+                            f"cur.execute(\"INSERT INTO {tname} VALUES (1, 'Alice')\")\n"
+                            f"cur.execute(\"{stmt.replace(chr(10), ' ')}\")\n"
+                            f"print(cur.fetchall())\nconn.close()"
+                        ),
+                    })
+                elif m_insert:
+                    tname = m_insert.group(1)
+                    items.append({
+                        "name": tname, "role": "INSERT INTO",
+                        "syntax": stmt.splitlines()[0],
+                        "how": "Inserts a new row into a table.",
+                        "purpose": f"Adds data to '{tname}'.",
+                        "usage": stmt,
+                        "sample": (
+                            f"import sqlite3\nconn = sqlite3.connect(':memory:')\ncur = conn.cursor()\n"
+                            f"cur.execute(\"CREATE TABLE IF NOT EXISTS {tname} (id INTEGER, name TEXT)\")\n"
+                            f"cur.execute(\"{stmt.replace(chr(10), ' ')}\")\n"
+                            f"conn.commit()\ncur.execute('SELECT * FROM {tname}')\n"
+                            f"print(cur.fetchall())\nconn.close()"
+                        ),
+                    })
+                elif m_update:
+                    tname = m_update.group(1)
+                    items.append({
+                        "name": tname, "role": "UPDATE",
+                        "syntax": stmt.splitlines()[0],
+                        "how": "Modifies existing rows in a table.",
+                        "purpose": f"Updates data in '{tname}'.",
+                        "usage": stmt, "sample": stmt,
+                    })
+                elif m_delete:
+                    tname = m_delete.group(1)
+                    items.append({
+                        "name": tname, "role": "DELETE FROM",
+                        "syntax": stmt.splitlines()[0],
+                        "how": "Removes rows from a table.",
+                        "purpose": f"Deletes data from '{tname}'.",
+                        "usage": stmt, "sample": stmt,
+                    })
+                elif m_alter:
+                    tname = m_alter.group(1)
+                    items.append({
+                        "name": tname, "role": "ALTER TABLE",
+                        "syntax": stmt.splitlines()[0],
+                        "how": "Modifies an existing table structure.",
+                        "purpose": f"Changes schema of '{tname}'.",
+                        "usage": stmt, "sample": stmt,
+                    })
+                elif m_drop:
+                    tname = m_drop.group(1)
+                    items.append({
+                        "name": tname, "role": "DROP TABLE",
+                        "syntax": stmt.splitlines()[0],
+                        "how": "Permanently removes a table.",
+                        "purpose": f"Deletes '{tname}' and all its data.",
+                        "usage": stmt, "sample": stmt,
+                    })
+                else:
+                    # Generic statement
+                    items.append({
+                        "name": first_line.split()[0] if first_line else "statement",
+                        "role": "SQL statement",
+                        "syntax": stmt.splitlines()[0],
+                        "how": "Executes a SQL command.",
+                        "purpose": "Performs a database operation.",
+                        "usage": stmt, "sample": stmt,
+                    })
+            return items[:30]
+
+        # ── Python (default) ──────────────────────────────────────────────
         for line in code.splitlines():
             s = line.strip()
             m = re.match(r'^(?:from\s+(\S+)\s+)?import\s+(.+)', s)
@@ -357,22 +959,60 @@ class _CodeKeyPointRow(QWidget):
         b_lay.setContentsMargins(14, 8, 14, 12)
         b_lay.setSpacing(8)
 
-        # Explanation
-        explain_lbl = QLabel(
-            f"<b>Syntax:</b> <code>{item.get('syntax','—')}</code><br>"
+        # Explanation with Read button
+        explain_text = (
+            f"Syntax: {item.get('syntax','—')}\n"
+            f"How it works: {item.get('how','—')}\n"
+            f"Purpose: {item.get('purpose','—')}"
+        )
+        explain_html = (
+            f"<b>Syntax:</b> <code style='color:#ce9178'>{item.get('syntax','—')}</code><br>"
             f"<b>How it works:</b> {item.get('how','—')}<br>"
             f"<b>Purpose:</b> {item.get('purpose','—')}"
         )
+        explain_lbl = QLabel(explain_html)
         explain_lbl.setObjectName("cardBody")
         explain_lbl.setWordWrap(True)
         explain_lbl.setTextFormat(Qt.TextFormat.RichText)
         explain_lbl.setStyleSheet("font-size: 12px;")
         b_lay.addWidget(explain_lbl)
 
+        # Read button — reads explanation aloud (not code)
+        read_row = QHBoxLayout()
+        read_row.setContentsMargins(0, 0, 0, 0)
+        read_row.addStretch()
+        read_btn = QPushButton("▶  Read")
+        read_btn.setObjectName("btnOutline")
+        read_btn.setFixedSize(80, 26)
+        read_btn.setToolTip("Let Veaja read this explanation aloud")
+        read_btn.clicked.connect(lambda _=False, t=explain_text: self._read_aloud(t))
+        read_row.addWidget(read_btn)
+        b_lay.addLayout(read_row)
+
+        # Syntax-highlighted code preview
+        code_preview = QLabel()
+        code_preview.setTextFormat(Qt.TextFormat.RichText)
+        code_preview.setWordWrap(False)
+        code_preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        sample = item.get("sample", item.get("usage", ""))
+        code_preview.setText(_highlight_python(sample))
+        b_lay.addWidget(code_preview)
+
+        # ── Nested sub-points ─────────────────────────────────────────────
+        sub_points = self._build_sub_points(item)
+        if sub_points:
+            sub_lbl = QLabel("Sub-points:")
+            sub_lbl.setObjectName("featureLabel")
+            sub_lbl.setStyleSheet("font-size: 11px; margin-top: 4px;")
+            b_lay.addWidget(sub_lbl)
+            for sp_title, sp_body in sub_points:
+                sp_row = _SubPointRow(sp_title, sp_body, mixin)
+                b_lay.addWidget(sp_row)
+
         # Code editor label row
         editor_hdr = QHBoxLayout()
         editor_hdr.setContentsMargins(0, 4, 0, 0)
-        editor_lbl = QLabel("Sample code  —  edit and run:")
+        editor_lbl = QLabel("Edit & run sample:")
         editor_lbl.setObjectName("featureLabel")
         editor_lbl.setStyleSheet("font-size: 11px;")
         editor_hdr.addWidget(editor_lbl)
@@ -394,11 +1034,12 @@ class _CodeKeyPointRow(QWidget):
         # Code editor
         self._editor = QTextEdit()
         self._editor.setObjectName("codeEdit")
-        self._editor.setFixedHeight(120)
+        self._editor.setFixedHeight(110)
         mono = QFont("Consolas", 10)
         mono.setStyleHint(QFont.StyleHint.Monospace)
         self._editor.setFont(mono)
-        self._editor.setPlainText(item.get("sample", item.get("usage", "")))
+        self._editor.setPlainText(sample)
+        _CodeHighlighter(self._editor.document(), lang)
         b_lay.addWidget(self._editor)
 
         # Output panel
@@ -417,10 +1058,38 @@ class _CodeKeyPointRow(QWidget):
         self._output = QTextEdit()
         self._output.setObjectName("codeEdit")
         self._output.setReadOnly(True)
-        self._output.setFixedHeight(90)
+        self._output.setFixedHeight(80)
         self._output.setFont(mono)
         self._output.setPlaceholderText("Run the code to see output here…")
         b_lay.addWidget(self._output)
+
+        # ── Ask Q&A ───────────────────────────────────────────────────────
+        ask_sep = QLabel("Ask about this point:")
+        ask_sep.setObjectName("featureLabel")
+        ask_sep.setStyleSheet("font-size: 11px; margin-top: 4px;")
+        b_lay.addWidget(ask_sep)
+
+        ask_row = QHBoxLayout()
+        ask_row.setSpacing(6)
+        self._ask_input = QTextEdit()
+        self._ask_input.setObjectName("featureEdit")
+        self._ask_input.setPlaceholderText("e.g. Why use this? What does this parameter do?")
+        self._ask_input.setFixedHeight(50)
+        ask_row.addWidget(self._ask_input, 1)
+
+        ask_btn = QPushButton("Ask")
+        ask_btn.setObjectName("btnPrimary")
+        ask_btn.setFixedSize(56, 50)
+        ask_btn.clicked.connect(self._ask_about)
+        ask_row.addWidget(ask_btn)
+        b_lay.addLayout(ask_row)
+
+        self._answer_lbl = QLabel("")
+        self._answer_lbl.setObjectName("cardBody")
+        self._answer_lbl.setWordWrap(True)
+        self._answer_lbl.setStyleSheet("font-size: 12px; padding: 6px; border-radius: 6px;")
+        self._answer_lbl.setVisible(False)
+        b_lay.addWidget(self._answer_lbl)
 
         root.addWidget(self._body)
 
@@ -478,3 +1147,251 @@ class _CodeKeyPointRow(QWidget):
         self._editor.setPlainText(self._item.get("sample", self._item.get("usage", "")))
         self._output.clear()
         self._status_lbl.setText("")
+
+    def _read_aloud(self, text: str):
+        try:
+            self._mixin.read_requested.emit(text)
+        except Exception:
+            pass
+
+    def _ask_about(self):
+        question = self._ask_input.toPlainText().strip()
+        if not question:
+            return
+        item = self._item
+        self._answer_lbl.setText("Thinking…")
+        self._answer_lbl.setVisible(True)
+
+        from gui.pages._ai_caller import call_ai
+        from PyQt6.QtCore import QThread, QObject, pyqtSignal as _sig
+
+        class _S(QObject):
+            done = _sig(str)
+        class _T(QThread):
+            def __init__(self, q, i, m, s):
+                super().__init__(); self._q=q; self._i=i; self._m=m; self._s=s
+            def run(self):
+                system = (
+                    "You are a code expert. Answer questions about specific code elements clearly. "
+                    "Be concise and practical."
+                )
+                prompt = (
+                    f"Code element: {self._i['name']} ({self._i['role']})\n"
+                    f"Syntax: {self._i.get('syntax','—')}\n\n"
+                    f"Question: {self._q}"
+                )
+                self._s.done.emit(call_ai("code", prompt, self._m, system))
+
+        self._ask_signals = _S()
+        self._ask_signals.done.connect(lambda r: (
+            self._answer_lbl.setText(r),
+            self._answer_lbl.setVisible(True)
+        ))
+        self._ask_thread2 = _T(question, item, self._mixin, self._ask_signals)
+        self._ask_thread2.start()
+
+    def _build_sub_points(self, item: dict) -> list[tuple[str, str]]:
+        """Generate nested sub-points for a code item."""
+        role = item.get("role", "")
+        name = item.get("name", "")
+        sub = []
+        if "class" in role:
+            sub = [
+                ("Constructor (__init__)",
+                 f"The __init__ method initialises a new {name} instance. "
+                 f"Called automatically when you do {name}()."),
+                ("Inheritance",
+                 f"Inheriting from a base class lets {name} reuse its methods and attributes. "
+                 f"Use super() to call the parent's methods."),
+                ("Instance vs Class attributes",
+                 "Instance attributes (self.x) belong to each object. "
+                 "Class attributes are shared across all instances."),
+            ]
+        elif role in ("function", "method"):
+            sub = [
+                ("Parameters",
+                 f"Parameters are the inputs to {name}. "
+                 "They let you pass different values each time you call the function."),
+                ("Return value",
+                 f"{name} can return a value using 'return'. "
+                 "If no return statement, it returns None."),
+                ("Scope",
+                 "Variables defined inside a function are local — "
+                 "they don't exist outside the function."),
+            ]
+        elif "import" in role:
+            sub = [
+                ("Why import?",
+                 f"Importing {name} gives you access to code written by others "
+                 "without rewriting it yourself."),
+                ("Aliasing",
+                 f"You can alias: 'import {name} as x' to use a shorter name."),
+            ]
+        elif "constant" in role:
+            sub = [
+                ("Convention",
+                 "ALL_CAPS names signal to other developers that this value should not change."),
+                ("Usage",
+                 f"Reference {name} by name throughout your code instead of repeating the value."),
+            ]
+        return sub
+
+
+# ── Nested sub-point row ──────────────────────────────────────────────────────
+
+class _SubPointRow(QWidget):
+    """A collapsible nested sub-point inside a key-point row."""
+
+    def __init__(self, title: str, body: str, mixin, parent=None):
+        super().__init__(parent)
+        self._mixin    = mixin
+        self._expanded = False
+        self.setObjectName("expandableRow")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header
+        hdr = QWidget()
+        hdr.setObjectName("expandableRowHeader")
+        hdr.setCursor(Qt.CursorShape.PointingHandCursor)
+        h_lay = QHBoxLayout(hdr)
+        h_lay.setContentsMargins(8, 5, 8, 5)
+        h_lay.setSpacing(6)
+
+        self._arrow = QLabel("▷")
+        self._arrow.setFixedWidth(12)
+        self._arrow.setStyleSheet("color: #666; font-size: 9px; background: transparent;")
+        h_lay.addWidget(self._arrow)
+
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("cardBody")
+        title_lbl.setStyleSheet("font-size: 11px; font-weight: 600;")
+        h_lay.addWidget(title_lbl, 1)
+
+        # Read sub-point
+        read_btn = QPushButton("▶")
+        read_btn.setObjectName("btnOutline")
+        read_btn.setFixedSize(26, 22)
+        read_btn.setToolTip("Read aloud")
+        read_btn.clicked.connect(lambda _=False, t=body: self._read(t))
+        h_lay.addWidget(read_btn)
+
+        root.addWidget(hdr)
+        hdr.mousePressEvent = lambda _: self._toggle()
+
+        # Body
+        self._body_lbl = QLabel(body)
+        self._body_lbl.setObjectName("cardBody")
+        self._body_lbl.setWordWrap(True)
+        self._body_lbl.setStyleSheet(
+            "font-size: 11px; padding: 6px 8px 6px 22px;"
+        )
+        self._body_lbl.setVisible(False)
+        root.addWidget(self._body_lbl)
+
+    def _toggle(self):
+        self._expanded = not self._expanded
+        self._body_lbl.setVisible(self._expanded)
+        self._arrow.setText("▽" if self._expanded else "▷")
+
+    def _read(self, text: str):
+        try:
+            self._mixin.read_requested.emit(text)
+        except Exception:
+            pass
+
+# ── Syntax highlighter ────────────────────────────────────────────────────────
+
+def _highlight_python(code: str) -> str:
+    """Convert Python code to HTML with VS Code-style syntax colouring."""
+    import html as _h
+    import re as _re
+
+    KEYWORDS = {
+        "False","None","True","and","as","assert","async","await",
+        "break","class","continue","def","del","elif","else","except",
+        "finally","for","from","global","if","import","in","is",
+        "lambda","nonlocal","not","or","pass","raise","return","try",
+        "while","with","yield",
+    }
+    BUILTINS = {
+        "print","len","range","type","int","str","float","list","dict",
+        "set","tuple","bool","open","input","super","self","cls",
+        "enumerate","zip","map","filter","sorted","reversed","any","all",
+        "min","max","sum","abs","round","isinstance","hasattr","getattr",
+        "setattr","staticmethod","classmethod","property",
+    }
+
+    # Colours (VS Code Dark+ palette)
+    C_KW      = "#569cd6"   # blue   — keywords
+    C_BUILTIN = "#dcdcaa"   # yellow — builtins
+    C_STR     = "#ce9178"   # orange — strings
+    C_COMMENT = "#6a9955"   # green  — comments
+    C_NUM     = "#b5cea8"   # light green — numbers
+    C_DECO    = "#c586c0"   # purple — decorators
+    C_CLASS   = "#4ec9b0"   # teal   — class names
+    C_FUNC    = "#dcdcaa"   # yellow — function names
+    C_DEFAULT = "#d4d4d4"   # light grey — default text
+
+    lines_out = []
+    for line in code.splitlines():
+        # Comment
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            lines_out.append(
+                f'<span style="color:{C_COMMENT}">{_h.escape(line)}</span>'
+            )
+            continue
+
+        # Decorator
+        if stripped.startswith("@"):
+            lines_out.append(
+                f'<span style="color:{C_DECO}">{_h.escape(line)}</span>'
+            )
+            continue
+
+        # Tokenise the line
+        tokens = _re.split(r'(\s+|[^\w\s])', line)
+        out = []
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if not tok:
+                i += 1
+                continue
+            # String literals (simple single/double quote)
+            if tok in ('"', "'"):
+                quote = tok
+                s = quote
+                i += 1
+                while i < len(tokens):
+                    s += tokens[i]
+                    if tokens[i] == quote:
+                        i += 1
+                        break
+                    i += 1
+                out.append(f'<span style="color:{C_STR}">{_h.escape(s)}</span>')
+                continue
+            # Number
+            if _re.fullmatch(r'\d+\.?\d*', tok):
+                out.append(f'<span style="color:{C_NUM}">{_h.escape(tok)}</span>')
+            # Keyword
+            elif tok in KEYWORDS:
+                out.append(f'<span style="color:{C_KW};font-weight:600">{_h.escape(tok)}</span>')
+            # Builtin / function name after def
+            elif tok in BUILTINS:
+                out.append(f'<span style="color:{C_BUILTIN}">{_h.escape(tok)}</span>')
+            else:
+                out.append(f'<span style="color:{C_DEFAULT}">{_h.escape(tok)}</span>')
+            i += 1
+        lines_out.append("".join(out))
+
+    bg = "#1e1e1e"
+    body = "<br>".join(lines_out)
+    return (
+        f'<div style="background:{bg};padding:10px 14px;border-radius:6px;'
+        f'font-family:Consolas,monospace;font-size:11pt;line-height:1.6;">'
+        f'{body}</div>'
+    )

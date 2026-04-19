@@ -715,10 +715,88 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
     def showEvent(self, event):
         super().showEvent(event)
         self._enable_dwm_shadow()
-        # Start the title fade timer only once, when the window first appears
         if hasattr(self, "_dashboard_title") and not getattr(self, "_title_fade_armed", False):
             self._title_fade_armed = True
             self._restart_dashboard_title_fade()
+        if not getattr(self, "_zoom_shortcuts_set", False):
+            self._zoom_shortcuts_set = True
+            self._setup_zoom_shortcuts()
+            # Also catch Ctrl+Wheel like VS Code
+            QApplication.instance().installEventFilter(self)
+
+    # ── Zoom (Ctrl++ / Ctrl+- / Ctrl+0) ──────────────────────────────────────
+
+    _ZOOM_STEP   = 0.1
+    _ZOOM_MIN    = 0.6
+    _ZOOM_MAX    = 2.0
+    _zoom_factor = 1.0
+
+    def _setup_zoom_shortcuts(self):
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        ctx = Qt.ShortcutContext.ApplicationShortcut
+        for seq in ("Ctrl++", "Ctrl+=", "Ctrl+Shift+="):
+            s = QShortcut(QKeySequence(seq), self)
+            s.setContext(ctx)
+            s.activated.connect(
+                lambda: self._zoom(MainWindow._zoom_factor + self._ZOOM_STEP)
+            )
+        s_minus = QShortcut(QKeySequence("Ctrl+-"), self)
+        s_minus.setContext(ctx)
+        s_minus.activated.connect(
+            lambda: self._zoom(MainWindow._zoom_factor - self._ZOOM_STEP)
+        )
+        s_zero = QShortcut(QKeySequence("Ctrl+0"), self)
+        s_zero.setContext(ctx)
+        s_zero.activated.connect(lambda: self._zoom(1.0))
+
+    def _zoom(self, factor: float):
+        factor = max(self._ZOOM_MIN, min(self._ZOOM_MAX, round(factor, 2)))
+        MainWindow._zoom_factor = factor
+        app = QApplication.instance()
+        if app:
+            new_pt = max(6, round(10.0 * factor))
+            font = app.font()
+            font.setPointSize(new_pt)
+            app.setFont(font)
+        self._apply_theme()
+        pct  = int(factor * 100)
+        orig = self.windowTitle().split("  [")[0]
+        self.setWindowTitle(f"{orig}  [{pct}%]")
+        QTimer.singleShot(1500, lambda: self.setWindowTitle(orig))
+
+    def eventFilter(self, obj, event):
+        from PyQt6.QtCore import QEvent
+        # Handle Ctrl+Wheel zoom (like VS Code)
+        if event.type() == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    self._zoom(MainWindow._zoom_factor + self._ZOOM_STEP)
+                elif delta < 0:
+                    self._zoom(MainWindow._zoom_factor - self._ZOOM_STEP)
+                return True
+
+        # ShortcutOverride fires BEFORE the widget processes the key —
+        # accepting it here prevents QTextEdit from swallowing Ctrl++/-
+        if event.type() in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress):
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                key = event.key()
+                if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
+                    if event.type() == QEvent.Type.KeyPress:
+                        self._zoom(MainWindow._zoom_factor + self._ZOOM_STEP)
+                    event.accept()
+                    return True
+                if key == Qt.Key.Key_Minus:
+                    if event.type() == QEvent.Type.KeyPress:
+                        self._zoom(MainWindow._zoom_factor - self._ZOOM_STEP)
+                    event.accept()
+                    return True
+                if key == Qt.Key.Key_0:
+                    if event.type() == QEvent.Type.KeyPress:
+                        self._zoom(1.0)
+                    event.accept()
+                    return True
+        return False
 
     def _enable_dwm_shadow(self):
         """Restore Windows drop-shadow on a frameless window via DWM."""

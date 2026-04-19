@@ -5,13 +5,13 @@ QWidget {
     color: #ffffff;
     font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
 }
-QLabel  { background: transparent; color: #ffffff; font-size: 9.8pt; }
+QLabel  { background: transparent; color: #ffffff; font-size: 11pt; }
 QFrame  { background: #333333; max-height: 1px; border: none; }
 QPushButton {
     background: transparent;
     border: none;
     color: #dddddd;
-    font-size: 10.5pt;
+    font-size: 12pt;
     text-align: left;
     padding: 2px 4px;
     border-radius: 4px;
@@ -25,7 +25,7 @@ QPushButton#dashBtn {
     color: #1a1a1a;
     border: 1px solid #cccccc;
     border-radius: 5px;
-    font-size: 10.5pt;
+    font-size: 12pt;
     font-weight: 500;
     text-align: center;
     padding: 9px 0;
@@ -44,15 +44,15 @@ QPushButton#themeBtn {
     background: transparent;
     border: none;
     color: #aaaaaa;
-    font-size: 12.8pt;
+    font-size: 14pt;
     text-align: center;
     padding: 0;
     border-radius: 4px;
 }
 QPushButton#themeBtn:hover { background: rgba(255,255,255,0.1); color: #ffffff; }
-QLabel#profileName { color: #ffffff; font-size: 11.3pt; font-weight: 600; background: transparent; }
-QLabel#helpLabel   { color: #cccccc; font-size: 9.8pt; font-weight: 600; background: transparent; }
-QLabel#editIcon    { color: #aaaaaa; font-size: 9.8pt; background: transparent; }
+QLabel#profileName { color: #ffffff; font-size: 12.5pt; font-weight: 600; background: transparent; }
+QLabel#helpLabel   { color: #cccccc; font-size: 11pt; font-weight: 600; background: transparent; }
+QLabel#editIcon    { color: #aaaaaa; font-size: 11pt; background: transparent; }
 """
 
 # ── Sidebar QSS — DARK mode (sidebar is light) ────────────────────────────────
@@ -62,13 +62,13 @@ QWidget {
     color: #1a1a1a;
     font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
 }
-QLabel  { background: transparent; color: #1a1a1a; font-size: 9.8pt; }
+QLabel  { background: transparent; color: #1a1a1a; font-size: 11pt; }
 QFrame  { background: #cccccc; max-height: 1px; border: none; }
 QPushButton {
     background: transparent;
     border: none;
     color: #333333;
-    font-size: 10.5pt;
+    font-size: 12pt;
     text-align: left;
     padding: 2px 4px;
     border-radius: 4px;
@@ -82,7 +82,7 @@ QPushButton#dashBtn {
     color: #ffffff;
     border: 1px solid #555555;
     border-radius: 5px;
-    font-size: 10.5pt;
+    font-size: 12pt;
     font-weight: 500;
     text-align: center;
     padding: 9px 0;
@@ -101,13 +101,13 @@ QPushButton#themeBtn {
     background: transparent;
     border: none;
     color: #666666;
-    font-size: 12.8pt;
+    font-size: 14pt;
     text-align: center;
     padding: 0;
     border-radius: 4px;
 }
 QPushButton#themeBtn:hover { background: rgba(0,0,0,0.07); color: #1a1a1a; }
-QLabel#profileName { color: #1a1a1a; font-size: 11.3pt; font-weight: 600; background: transparent; }
-QLabel#helpLabel   { color: #555555; font-size: 9.8pt; font-weight: 600; background: transparent; }
-QLabel#editIcon    { color: #888888; font-size: 9.8pt; background: transparent; }
+QLabel#profileName { color: #1a1a1a; font-size: 12.5pt; font-weight: 600; background: transparent; }
+QLabel#helpLabel   { color: #555555; font-size: 11pt; font-weight: 600; background: transparent; }
+QLabel#editIcon    { color: #888888; font-size: 11pt; background: transparent; }
 """

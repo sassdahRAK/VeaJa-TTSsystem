@@ -117,12 +117,11 @@ class DraggableTabBar(QWidget):
         self._drop_pos: int | None = None
 
         self.setObjectName("tabBar")
-        self.setFixedHeight(36)
+        # No fixed height — let FlowLayout determine height based on content
+        self.setMinimumHeight(36)
 
-        from PyQt6.QtWidgets import QHBoxLayout
-        self._layout = QHBoxLayout(self)
+        self._layout = FlowLayout(self, h_spacing=0, v_spacing=0)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(0)
 
         self._buttons: list[QPushButton] = []
         self._rebuild_buttons()
@@ -171,11 +170,9 @@ class DraggableTabBar(QWidget):
             btn.setCheckable(True)
             btn.setFixedHeight(36)
             btn.setCursor(Qt.CursorShape.OpenHandCursor)
-            # Let the button size to its content — no fixed width
-            btn.setSizePolicy(
-                btn.sizePolicy().horizontalPolicy(),
-                btn.sizePolicy().verticalPolicy()
-            )
+            # Size to full text — no truncation
+            fm = btn.fontMetrics()
+            btn.setMinimumWidth(fm.horizontalAdvance(base_label) + 42)
 
             if locked:
                 btn.setIcon(self._lock_icon())
@@ -190,7 +187,6 @@ class DraggableTabBar(QWidget):
             self._layout.addWidget(btn)
             self._buttons.append(btn)
 
-        self._layout.addStretch()
         self._refresh_checked()
 
     def _lock_icon(self):

@@ -6,7 +6,26 @@ from PyQt6.QtWidgets import (
     QTextEdit, QScrollArea, QFrame, QStackedWidget
 )
 from gui._window_shared import scaled  # noqa: F401
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal
+from gui.pages._ai_caller import call_ai, get_api_keys, best_provider
+
+
+# ── Background worker ─────────────────────────────────────────────────────────
+
+class _GramSignals(QObject):
+    finished = pyqtSignal(str)
+
+class _GramThread(QThread):
+    def __init__(self, prompt, system, mixin, signals):
+        super().__init__()
+        self._prompt  = prompt
+        self._system  = system
+        self._mixin   = mixin
+        self._signals = signals
+
+    def run(self):
+        result = call_ai("grammar", self._prompt, self._mixin, self._system)
+        self._signals.finished.emit(result)
 
 
 class GrammarTabMixin:
@@ -190,24 +209,75 @@ class GrammarTabMixin:
             return
         mode = self._gram_stack.currentIndex()
 
-        if mode == 0:
-            issues = self._basic_grammar_check(text)
-            self._gram_issues_out.setPlainText(
-                issues if issues else "✓ No obvious issues found.\n\n"
-                "Connect an AI API key for deep grammar analysis."
-            )
-        elif mode == 1:
-            self._gram_rewrite_out.setPlainText(
-                f"[Rewritten version]\n\n{text}\n\n"
-                "— Connect an AI API key (OpenAI, Gemini, or Claude) "
-                "in My API Key for real grammar correction."
-            )
+        keys = get_api_keys(self)
+        provider_result = best_provider("grammar", keys)
+
+        if provider_result:
+            provider, _ = provider_result
+            self._gram_run_btn.setEnabled(False)
+            self._gram_run_btn.setText("Thinking…")
+
+            systems = {
+                0: (
+                    "You are a professional grammar checker. "
+                    "List every grammar, spelling, punctuation, and style issue found. "
+                    "For each issue: show the original text, the problem, and the fix. "
+                    "Use this format:\n• Issue: [original] → Fix: [corrected] — Reason: [why]"
+                ),
+                1: (
+                    "You are a professional editor. "
+                    "Rewrite the given text to fix all grammar, spelling, and style issues. "
+                    "Preserve the original meaning and tone. "
+                    "Return only the corrected text, no explanations."
+                ),
+                2: (
+                    "You are an English grammar teacher. "
+                    "Explain the grammar rules relevant to the given text. "
+                    "Cover tense, subject-verb agreement, punctuation, and style. "
+                    "Be educational and clear."
+                ),
+            }
+            system = systems[mode]
+            prompts = {
+                0: f"Check this text for grammar issues:\n\n{text}",
+                1: f"Rewrite this text with all grammar issues fixed:\n\n{text}",
+                2: f"Explain the grammar rules in this text:\n\n{text}",
+            }
+            prompt = prompts[mode]
+
+            signals = _GramSignals()
+            signals.finished.connect(lambda r: self._gram_on_finished(r, mode))
+            self._gram_thread = _GramThread(prompt, system, self, signals)
+            self._gram_thread.start()
         else:
-            self._gram_explain_out.setPlainText(
-                f"[Grammar explanation for your text]\n\n"
-                "Connect an AI API key in My API Key to get a detailed "
-                "explanation of grammar rules, tense usage, and style suggestions."
-            )
+            # Fallback: basic local check
+            if mode == 0:
+                issues = self._basic_grammar_check(text)
+                self._gram_issues_out.setPlainText(
+                    issues if issues else
+                    "✓ No obvious issues found.\n\n"
+                    "Add an OpenAI, Claude, or Gemini key in My API Key for deep AI analysis."
+                )
+            elif mode == 1:
+                self._gram_rewrite_out.setPlainText(
+                    f"[Rewritten version]\n\n{text}\n\n"
+                    "— Add an AI API key in My API Key for real grammar correction."
+                )
+            else:
+                self._gram_explain_out.setPlainText(
+                    "— Add an AI API key in My API Key for grammar explanations."
+                )
+
+    def _gram_on_finished(self, result: str, mode: int):
+        self._gram_run_btn.setEnabled(True)
+        labels = ["Check Grammar", "Rewrite", "Explain"]
+        self._gram_run_btn.setText(labels[mode])
+        if mode == 0:
+            self._gram_issues_out.setPlainText(result)
+        elif mode == 1:
+            self._gram_rewrite_out.setPlainText(result)
+        else:
+            self._gram_explain_out.setPlainText(result)
 
     def _basic_grammar_check(self, text: str) -> str:
         """Simple rule-based checks — no external deps."""

@@ -156,8 +156,9 @@ class SummaryTabMixin:
         outer_lay.addWidget(scroll, 1)
 
         # ── Profession selector ───────────────────────────────────────────
-        prof_header = QLabel("Your role  —  for deeper, field-specific summaries:")
+        prof_header = QLabel("Add your role or your topic  —  for deeper, field-specific summaries:")
         prof_header.setObjectName("featureLabel")
+        prof_header.setStyleSheet("color: #e53935;")
         lay.addWidget(prof_header)
 
         prof_scroll = QScrollArea()
@@ -272,17 +273,38 @@ class SummaryTabMixin:
         attach_lbl.setStyleSheet("font-size: 11px;")
         attach_row.addWidget(attach_lbl)
 
-        for icon, tip, slot in [
-            ("📄", "File (txt/pdf/docx)", self._sum_attach_file),
-            ("📁", "Folder",              self._sum_attach_folder),
-            ("🔗", "Git repo URL",        self._sum_attach_git),
-            ("🌐", "Web link",            self._sum_attach_link),
-            ("🖼", "Image",               self._sum_attach_image),
+        for svg_body, tip, slot in [
+            # File — document icon
+            ('<path d="M4 2h8l4 4v14H4V2z" stroke="{c}" stroke-width="1.4" fill="none" stroke-linejoin="round"/>'
+             '<path d="M12 2v4h4" stroke="{c}" stroke-width="1.4" fill="none"/>',
+             "File (txt/pdf/docx)", self._sum_attach_file),
+            # Folder
+            ('<path d="M2 6h7l2-2h9v14H2V6z" stroke="{c}" stroke-width="1.4" fill="none" stroke-linejoin="round"/>',
+             "Folder", self._sum_attach_folder),
+            # Link / chain
+            ('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" '
+             'stroke="{c}" stroke-width="1.5" fill="none" stroke-linecap="round"/>'
+             '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" '
+             'stroke="{c}" stroke-width="1.5" fill="none" stroke-linecap="round"/>',
+             "Git repo URL", self._sum_attach_git),
+            # Globe / web
+            ('<circle cx="12" cy="12" r="9" stroke="{c}" stroke-width="1.4" fill="none"/>'
+             '<path d="M12 3 C9 7 9 17 12 21 M12 3 C15 7 15 17 12 21" stroke="{c}" stroke-width="1.2" fill="none"/>'
+             '<path d="M3 12 H21" stroke="{c}" stroke-width="1.2"/>',
+             "Web link", self._sum_attach_link),
+            # Image / picture
+            ('<rect x="3" y="3" width="18" height="18" rx="2" stroke="{c}" stroke-width="1.4" fill="none"/>'
+             '<circle cx="8.5" cy="8.5" r="1.5" fill="{c}"/>'
+             '<path d="M21 15 l-5-5-4 4-2-2-7 7" stroke="{c}" stroke-width="1.3" fill="none" stroke-linejoin="round"/>',
+             "Image", self._sum_attach_image),
         ]:
-            btn = QPushButton(icon)
+            btn = QPushButton()
             btn.setObjectName("btnOutline")
             btn.setFixedSize(32, 28)
             btn.setToolTip(tip)
+            btn.setIcon(self._sum_svg_icon(svg_body, 16))
+            from PyQt6.QtCore import QSize
+            btn.setIconSize(QSize(16, 16))
             btn.clicked.connect(slot)
             attach_row.addWidget(btn)
 
@@ -429,6 +451,31 @@ class SummaryTabMixin:
                 for k in req_keys if k in self._api_key_inputs
             )
         return False
+
+    def _sum_svg_icon(self, svg_body: str, size: int):
+        """Render an inline SVG body as a QIcon, theme-aware."""
+        from PyQt6.QtSvg import QSvgRenderer
+        from PyQt6.QtGui import QPixmap, QPainter, QIcon, QColor
+        from PyQt6.QtWidgets import QApplication
+        is_dark = getattr(self, "_dark", False)
+        color = "#aaaaaa" if is_dark else "#666666"
+        svg = (
+            f'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+            f'{svg_body.replace("{c}", color)}'
+            f'</svg>'
+        ).encode()
+        app = QApplication.instance()
+        dpr = app.primaryScreen().devicePixelRatio() if app and app.primaryScreen() else 1.0
+        phys = int(size * dpr)
+        px = QPixmap(phys, phys)
+        px.fill(QColor(0, 0, 0, 0))
+        renderer = QSvgRenderer(svg)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        renderer.render(p)
+        p.end()
+        px.setDevicePixelRatio(dpr)
+        return QIcon(px)
 
     def _sum_lock_icon(self):
         from PyQt6.QtSvg import QSvgRenderer

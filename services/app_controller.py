@@ -106,7 +106,8 @@ class AppController(QObject):
         self._overlay.reset_requested.connect(self._on_reset_requested)
 
         # ── Main window user actions ───────────────────────────────────────────
-        self._main_window.read_requested.connect(self._speak)
+        # Dashboard Read buttons use _speak_silent (no overlay popup)
+        self._main_window.read_requested.connect(self._speak_silent)
         self._main_window.stop_requested.connect(self._stop_speaking)
         self._main_window.pause_requested.connect(self._pause_speaking)
         self._main_window.resume_requested.connect(self._resume_speaking)
@@ -233,6 +234,11 @@ class AppController(QObject):
         self._speak(text)
 
     # ── TTS — speak ───────────────────────────────────────────────────────────
+
+    def _speak_silent(self, text: str) -> None:
+        """Speak from the dashboard — TTS only, no overlay popup."""
+        self._silent_read = True
+        self._speak(text)
 
     def _speak(self, text: str) -> None:
         """
@@ -382,9 +388,9 @@ class AppController(QObject):
         self._overlay.set_speaking(True)
         self._main_window.set_read_state(ReadState.SPEAKING)
         self._main_window.mark_reading_started(self._current_text)
-        # Show the overlay so spin/glow animations are visible even when
-        # the user triggered reading from the main window
-        if not self._overlay.isVisible():
+        # Only show overlay if the read was triggered externally (clipboard/hotkey),
+        # not from a dashboard Read button (_silent_read flag suppresses it)
+        if not self._overlay.isVisible() and not getattr(self, "_silent_read", False):
             self._overlay.show_overlay()
 
     def _on_speaking_paused(self) -> None:
@@ -401,6 +407,7 @@ class AppController(QObject):
 
     def _on_speaking_finished(self) -> None:
         """Audio playback has ended (naturally or was stopped)."""
+        self._silent_read = False
         self._overlay.set_processing(False)
         self._overlay.set_speaking(False)
         self._overlay.set_paused(False)

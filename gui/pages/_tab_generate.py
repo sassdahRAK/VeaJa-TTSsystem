@@ -5,9 +5,28 @@ from PyQt6.QtWidgets import (
     QTextEdit, QApplication
 )
 from gui._window_shared import scaled  # noqa: F401
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal
 
 from gui.pages._flow_layout import FlowLayout as _FlowLayout
+from gui.pages._ai_caller import call_ai, get_api_keys, best_provider
+
+
+# ── Background worker ─────────────────────────────────────────────────────────
+
+class _GenSignals(QObject):
+    finished = pyqtSignal(str)
+
+class _GenThread(QThread):
+    def __init__(self, prompt, system, mixin, signals):
+        super().__init__()
+        self._prompt  = prompt
+        self._system  = system
+        self._mixin   = mixin
+        self._signals = signals
+
+    def run(self):
+        result = call_ai("generate", self._prompt, self._mixin, self._system)
+        self._signals.finished.emit(result)
 
 
 class GenerateTabMixin:
@@ -25,6 +44,7 @@ class GenerateTabMixin:
         "Generate a full web project scaffold: HTML, CSS, JS, and file structure.",
         "Generate an app development plan: architecture, screens, components, and tech stack.",
         "Generate a network topology plan: devices, subnets, protocols, and config snippets.",
+        "Generate a quiz with multiple-choice questions, answers, and explanations.",
     ]
 
     def _build_generate_tab(self) -> QWidget:
@@ -41,7 +61,7 @@ class GenerateTabMixin:
         mb_lay.setContentsMargins(0, 4, 0, 4)
 
         self._gen_modes = ["Poster", "Prompt", "Instruction", "Caption", "Adjust",
-                           "Slide", "Video", "HTML", "Web", "App", "Network"]
+                           "Slide", "Video", "HTML", "Web", "App", "Network", "Quiz"]
         self._gen_mode_btns: list[QPushButton] = []
         for i, label in enumerate(self._gen_modes):
             btn = QPushButton(label)
@@ -110,16 +130,23 @@ class GenerateTabMixin:
         gen_row = QHBoxLayout()
         gen_row.setContentsMargins(0, 0, 0, 0)
         gen_row.addStretch()
+
+        # AI provider indicator
+        self._gen_ai_lbl = QLabel("")
+        self._gen_ai_lbl.setObjectName("settingsLabel")
+        self._gen_ai_lbl.setStyleSheet("font-size: 10px; color: #888;")
+        gen_row.addWidget(self._gen_ai_lbl)
+
         clear_btn = QPushButton("Clear")
         clear_btn.setObjectName("btnOutline")
         clear_btn.setFixedSize(80, 30)
         clear_btn.clicked.connect(self._clear_generate)
         gen_row.addWidget(clear_btn)
-        gen_btn = QPushButton("Generate")
-        gen_btn.setObjectName("btnPrimary")
-        gen_btn.setFixedSize(110, 30)
-        gen_btn.clicked.connect(self._run_generate)
-        gen_row.addWidget(gen_btn)
+        self._gen_btn = QPushButton("Generate")
+        self._gen_btn.setObjectName("btnPrimary")
+        self._gen_btn.setFixedSize(110, 30)
+        self._gen_btn.clicked.connect(self._run_generate)
+        gen_row.addWidget(self._gen_btn)
         lay.addLayout(gen_row)
 
         # Output
@@ -235,13 +262,68 @@ class GenerateTabMixin:
         mode = self._current_gen_mode()
         if not text and not self._gen_attachments:
             return
-        result = self._generate_content(mode, text, self._gen_attachments)
+
+        # Check if AI key available
+        keys = get_api_keys(self)
+        provider_result = best_provider("generate", keys)
+
+        if provider_result:
+            # Use AI
+            provider, _ = provider_result
+            self._gen_ai_lbl.setText(f"✦ {provider.title()}")
+            self._gen_btn.setEnabled(False)
+            self._gen_btn.setText("Generating…")
+            self._gen_output.setPlainText("Generating…")
+            self._gen_output.setVisible(True)
+            self._gen_out_lbl.setVisible(True)
+
+            system, prompt = self._build_gen_prompt(mode, text)
+            signals = _GenSignals()
+            signals.finished.connect(self._on_gen_finished)
+            self._gen_thread = _GenThread(prompt, system, self, signals)
+            self._gen_thread.start()
+        else:
+            # Fallback template
+            self._gen_ai_lbl.setText("No AI key — using template")
+            result = self._generate_content(mode, text, self._gen_attachments)
+            self._gen_output.setPlainText(result)
+            self._gen_output.setVisible(True)
+            self._gen_out_lbl.setVisible(True)
+            self._gen_export_row.setVisible(True)
+            if hasattr(self, "_gen_preview_btn"):
+                self._gen_preview_btn.setVisible(mode == "HTML")
+
+    def _on_gen_finished(self, result: str):
+        self._gen_btn.setEnabled(True)
+        self._gen_btn.setText("Generate")
         self._gen_output.setPlainText(result)
-        self._gen_output.setVisible(True)
-        self._gen_out_lbl.setVisible(True)
         self._gen_export_row.setVisible(True)
         if hasattr(self, "_gen_preview_btn"):
-            self._gen_preview_btn.setVisible(mode == "HTML")
+            self._gen_preview_btn.setVisible(self._current_gen_mode() == "HTML")
+
+    def _build_gen_prompt(self, mode: str, text: str) -> tuple[str, str]:
+        """Return (system, user_prompt) for the given generate mode."""
+        attach_note = ""
+        if self._gen_attachments:
+            attach_note = "\n\nAttached sources:\n" + "\n".join(f"  • {a}" for a in self._gen_attachments)
+
+        systems = {
+            "Poster":      "You are a professional copywriter. Create a visual poster layout with a compelling headline, body text, and call-to-action. Use clear sections.",
+            "Prompt":      "You are an expert prompt engineer. Write an optimised AI prompt for the given task. Include role, context, task, format, and constraints.",
+            "Instruction": "You are a technical writer. Write clear, numbered step-by-step instructions. Include prerequisites, steps, and tips.",
+            "Caption":     "You are a social media expert. Write an engaging caption with relevant hashtags. Keep it punchy and on-brand.",
+            "Adjust":      "You are an expert editor. Rewrite the given text to improve clarity, tone, and style. Preserve the original meaning.",
+            "Slide":       "You are a presentation designer. Create a detailed slide-by-slide outline with titles and bullet points for each slide.",
+            "Video":       "You are a video scriptwriter. Write a complete video script with scenes, timestamps, narration, and on-screen text.",
+            "HTML":        "You are a web developer. Generate a complete, self-contained HTML page with embedded CSS. Make it modern and responsive.",
+            "Web":         "You are a senior web architect. Generate a complete web project scaffold with file structure, tech stack, and starter code for each file.",
+            "App":         "You are a mobile/web app architect. Generate a detailed app development plan with architecture, screens, components, and tech stack.",
+            "Network":     "You are a network engineer. Generate a detailed network topology plan with devices, subnets, protocols, and config snippets.",
+            "Quiz":        "You are an educator. Generate a 5-question quiz with multiple choice answers, correct answers marked, and explanations.",
+        }
+        system = systems.get(mode, "You are a helpful assistant.")
+        prompt = f"{text}{attach_note}"
+        return system, prompt
 
     def _generate_content(self, mode: str, text: str, attachments: list) -> str:
         attach_note = (
@@ -279,6 +361,7 @@ class GenerateTabMixin:
             "Web":     self._gen_web_template(text),
             "App":     self._gen_app_template(text),
             "Network": self._gen_network_template(text),
+            "Quiz":    self._gen_quiz_template(text),
         }
         return templates.get(mode, text) + attach_note
 
@@ -560,4 +643,41 @@ class GenerateTabMixin:
             f"   ip helper-address 192.168.30.10\n"
             f"   no shutdown\n\n"
             f"— Connect an AI API key to generate full device configs."
+        )
+
+    def _gen_quiz_template(self, text: str) -> str:
+        topic = text[:60] or "General Knowledge"
+        return (
+            f"# Quiz: {topic}\n"
+            f"{'─'*50}\n\n"
+            f"Instructions: Choose the best answer for each question.\n\n"
+            f"──────────────────────────────────────\n"
+            f"Q1. What is the main concept of '{topic}'?\n\n"
+            f"   A) First option\n"
+            f"   B) Second option\n"
+            f"   C) Third option  ✓\n"
+            f"   D) Fourth option\n\n"
+            f"   ✎ Explanation: The correct answer is C because...\n\n"
+            f"──────────────────────────────────────\n"
+            f"Q2. Which of the following best describes {topic[:30] or 'this topic'}?\n\n"
+            f"   A) Incorrect description\n"
+            f"   B) Correct description  ✓\n"
+            f"   C) Partially correct\n"
+            f"   D) Unrelated answer\n\n"
+            f"   ✎ Explanation: B is correct because...\n\n"
+            f"──────────────────────────────────────\n"
+            f"Q3. True or False: {text[:80] or 'This statement is about the topic.'}\n\n"
+            f"   A) True  ✓\n"
+            f"   B) False\n\n"
+            f"   ✎ Explanation: This is true because...\n\n"
+            f"──────────────────────────────────────\n"
+            f"Q4. Fill in the blank: _______ is a key part of {topic[:30] or 'this subject'}.\n\n"
+            f"   Answer: [key concept here]\n\n"
+            f"   ✎ Explanation: ...\n\n"
+            f"──────────────────────────────────────\n"
+            f"Q5. Short answer: Explain {topic[:40] or 'the main idea'} in your own words.\n\n"
+            f"   Model answer: ...\n\n"
+            f"{'─'*50}\n"
+            f"Score: __ / 5\n\n"
+            f"— Connect an AI API key to generate a real quiz on any topic."
         )
