@@ -290,6 +290,7 @@ class OverlayWidget(QWidget):
     stop_requested     = pyqtSignal()        # emitted when user clicks to stop
     hide_requested     = pyqtSignal()
     settings_requested = pyqtSignal()
+    quit_requested     = pyqtSignal()        # emitted when user chooses Quit from context menu
     overlay_shown      = pyqtSignal()
     overlay_hidden     = pyqtSignal()
     reset_requested    = pyqtSignal()        # emitted when user clicks ⟳ reset
@@ -922,26 +923,35 @@ class OverlayWidget(QWidget):
         act_hide = QAction("Hide Veaja", self)
         act_hide.triggered.connect(self.hide_requested)
 
-        act_settings = QAction("Settings…", self)
+        act_settings = QAction("Dashboard…", self)
         act_settings.triggered.connect(self.settings_requested)
+
+        act_quit = QAction("Quit Veaja", self)
+        act_quit.triggered.connect(self.quit_requested)
 
         menu.addAction(act_hide)
         menu.addSeparator()
         menu.addAction(act_settings)
+        menu.addSeparator()
+        menu.addAction(act_quit)
         menu.exec(pos)
 
     def _menu_style(self) -> str:
-        dark = _is_dark_mode()
+        dark = self._dark   # use the stored flag, kept in sync with the app theme
         if dark:
             return (
                 "QMenu { background:#2C2C2E; color:#F5F5F5; border:1px solid #444; "
-                "border-radius:8px; padding:4px; }"
-                "QMenu::item:selected { background:#3A3A3C; border-radius:4px; }"
+                "border-radius:8px; padding:6px; }"
+                "QMenu::item { padding: 14px 24px; border-radius:4px; }"
+                "QMenu::item:selected { background:#3A3A3C; }"
+                "QMenu::separator { height:1px; background:#444; margin:4px 8px; }"
             )
         return (
             "QMenu { background:#FFFFFF; color:#1C1C1E; border:1px solid #DDD; "
-            "border-radius:8px; padding:4px; }"
-            "QMenu::item:selected { background:#F0F0F0; border-radius:4px; }"
+            "border-radius:8px; padding:6px; }"
+            "QMenu::item { padding: 14px 24px; border-radius:4px; }"
+            "QMenu::item:selected { background:#F0F0F0; }"
+            "QMenu::separator { height:1px; background:#DDD; margin:4px 8px; }"
         )
 
     # ------------------------------------------------------------------ #

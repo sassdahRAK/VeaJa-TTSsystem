@@ -82,7 +82,7 @@ _FlowLayout = FlowLayout
 # Canonical tab definitions — imported by dashboard_mixin and _DraggableTabBar
 TAB_DEFS = [
     ("Overlay",      0),
-    ("Text label",   1),
+    ("Read label",   1),
     ("Summary",      2),
     ("Translate",    3),
     ("Code",         4),
@@ -120,7 +120,7 @@ class DraggableTabBar(QWidget):
         # No fixed height — let FlowLayout determine height based on content
         self.setMinimumHeight(36)
 
-        self._layout = FlowLayout(self, h_spacing=0, v_spacing=0)
+        self._layout = FlowLayout(self, h_spacing=0, v_spacing=2)
         self._layout.setContentsMargins(0, 0, 0, 0)
 
         self._buttons: list[QPushButton] = []
@@ -188,6 +188,18 @@ class DraggableTabBar(QWidget):
             self._buttons.append(btn)
 
         self._refresh_checked()
+
+    def resizeEvent(self, event):
+        """Recalculate minimum height so wrapped rows are never clipped."""
+        super().resizeEvent(event)
+        h = self._layout.heightForWidth(event.size().width())
+        self.setMinimumHeight(max(36, h))
+
+    def sizeHint(self):
+        from PyQt6.QtCore import QSize
+        w = super().sizeHint().width()
+        h = self._layout.heightForWidth(w) if w > 0 else 36
+        return QSize(w, max(36, h))
 
     def _lock_icon(self):
         """Render a clean SVG padlock as a QIcon — matches current theme color."""

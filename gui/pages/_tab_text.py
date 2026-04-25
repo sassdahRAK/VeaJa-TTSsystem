@@ -1,4 +1,4 @@
-"""gui/pages/_tab_text.py — Text label tab for the Dashboard."""
+"""gui/pages/_tab_text.py — Read label tab for the Dashboard."""
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt
 
 
 class TextTabMixin:
-    """Text label tab builder and read/counter logic."""
+    """Read label tab builder and read/counter logic."""
 
     def _build_text_tab(self) -> QWidget:
         frame = QWidget()

@@ -14,7 +14,7 @@ from gui._window_shared import scaled  # noqa: F401
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QFont
 
-_LOCK_TIMEOUT_MS = 15_000
+_LOCK_TIMEOUT_MS = 300_000   # 5 minutes — enough time to fill in keys without rushing
 
 # ── Provider definitions ──────────────────────────────────────────────────────
 # Tuple: (name, subtitle, profile_key, placeholder, docs_url,
@@ -1841,7 +1841,35 @@ class ApiKeysMixin:
 
     def _save_api_keys(self):
         data = {k: field.text().strip() for k, field in self._api_key_inputs.items()}
+        # Debug: print which keys have values
+        import sys
+        set_keys = [k for k, v in data.items() if v]
+        print(f"[SAVE] Saving {len(set_keys)} keys: {set_keys}", file=sys.stderr)
         self.settings_save_requested.emit(data)
+        # Visual confirmation
+        self._api_show_save_confirmation()
+
+    def _api_show_save_confirmation(self):
+        """Briefly flash the Save button green to confirm the save worked."""
+        # Find the save button by searching the content page top bar
+        if not hasattr(self, "_api_content_page"):
+            return
+        from PyQt6.QtWidgets import QPushButton
+        for btn in self._api_content_page.findChildren(QPushButton):
+            if btn.text() == "Save":
+                original_text  = btn.text()
+                original_style = btn.styleSheet()
+                btn.setText("✓ Saved")
+                btn.setStyleSheet(
+                    "QPushButton { background: #22c55e; color: #ffffff; "
+                    "border: none; border-radius: 6px; font-weight: 600; }"
+                )
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(2000, lambda: (
+                    btn.setText(original_text),
+                    btn.setStyleSheet(original_style),
+                ))
+                break
 
     def _open_url(self, url: str):
         from PyQt6.QtGui import QDesktopServices

@@ -77,7 +77,7 @@ STEPS: list[dict] = [
     },
     {
         "widget_attr": "_text_edit",
-        "title": "Text Label Tab — Type or Paste",
+        "title": "Read Label Tab — Type or Paste",
         "body": "Type or paste text, then click Read.\nEach word highlights as it's spoken.",
         "navigate_to": 0,
         "tab": 1,

@@ -73,6 +73,9 @@ class ThemeMixin:
         # Settings page reset icon (theme-sensitive SVG)
         self._update_settings_reset_icon()
         self._update_overlay_reset_icon()
+        # Translate tab swap icon (theme-sensitive SVG)
+        if hasattr(self, "refresh_translate_icons"):
+            self.refresh_translate_icons()
 
     def _apply_sidebar_theme(self):
         if self._sidebar_widget is None:

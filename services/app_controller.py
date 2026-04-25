@@ -103,6 +103,7 @@ class AppController(QObject):
         self._overlay.stop_requested.connect(self._on_overlay_stop)
         self._overlay.hide_requested.connect(self._overlay.hide_overlay)
         self._overlay.settings_requested.connect(self._wm.show_main)
+        self._overlay.quit_requested.connect(self._quit)
         self._overlay.reset_requested.connect(self._on_reset_requested)
 
         # ── Main window user actions ───────────────────────────────────────────
@@ -456,6 +457,9 @@ class AppController(QObject):
         profile = self._profile.get()
         profile.update(settings)
         self._profile.save(profile)
+        # Re-apply the full profile so _api_key_inputs and other live widgets
+        # reflect the newly saved values in the same session.
+        self._main_window.apply_profile(profile)
 
     def _on_lang_changed(self, lang: str) -> None:
         """User selected a different language — switch TTS voices to native speakers."""
@@ -514,7 +518,7 @@ class AppController(QObject):
         """
         dlg = TermsDialog(
             online_mode=self._tts.is_edge_available(),
-            dark=self._is_dark_mode(),
+            dark=getattr(self._main_window, "_dark", self._is_dark_mode()),
             parent=self._main_window,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.dont_show_again():
@@ -526,7 +530,7 @@ class AppController(QObject):
         """Show the Terms dialog on demand (from the sidebar link)."""
         TermsDialog(
             online_mode=self._tts.is_edge_available(),
-            dark=self._is_dark_mode(),
+            dark=getattr(self._main_window, "_dark", self._is_dark_mode()),
             parent=self._main_window,
         ).exec()
 

@@ -93,13 +93,13 @@ class InfoPagesMixin:
              "Make sure the text is actually selectable — some protected PDFs or images do not expose their text.\n"
              "If Ctrl+R does not work, check that Veaja is running in the system tray (look for the tray icon).\n"
              "On macOS, Veaja may need Accessibility permission — go to System Settings → Privacy & Security → Accessibility and enable Veaja.\n"
-             "On Windows, some admin-protected applications may block text capture. Try copying the text manually and using the Text Label tab instead."),
+             "On Windows, some admin-protected applications may block text capture. Try copying the text manually and using the Read Label tab instead."),
             ("Q8. How many features does Veaja currently have?",
              "Veaja currently has 7 core features:\n\n"
              "1. Overlay Read (Ctrl+R or Ctrl+C)\n"
              "   Select any text on your screen and press Ctrl+R to read it immediately. Press Ctrl+C to pop up the floating overlay pill. The pill appears on top of all windows and highlights each word in real-time as Veaja speaks — so you can follow along without switching apps or losing your place.\n\n"
-             "2. Text Label tab\n"
-             "   Paste or type any text directly into the Text Label tab on the Dashboard and press Read. This is useful when you cannot select text from an app — for example, image-based PDFs or locked documents. You can stop, resume, or clear the text at any time.\n\n"
+             "2. Read Label tab\n"
+             "   Paste or type any text directly into the Read Label tab on the Dashboard and press Read. This is useful when you cannot select text from an app — for example, image-based PDFs or locked documents. You can stop, resume, or clear the text at any time.\n\n"
              "3. Voice Settings\n"
              "   Go to Voice Setting from the sidebar to customise how Veaja sounds and behaves. You can: choose your preferred voice and accent, set reading speed (slower to absorb detail, faster to skim), set volume, switch between Online mode (Azure Neural TTS — higher quality) and Offline mode (fully local, no internet needed), and pick your overlay shape — Circle (pill) or Rectangle.\n\n"
              "4. Overlay Shape Selection\n"
@@ -260,8 +260,8 @@ class InfoPagesMixin:
             ("Getting Started",
              "Select any text on your screen and press Ctrl+R to have Veaja read it aloud.\n"
              "Use Ctrl+C to pop up the overlay pill anywhere on your screen."),
-            ("Using Text Label",
-             "Navigate to Dashboard → Text label tab.\n"
+            ("Using Read Label",
+             "Navigate to Dashboard → Read label tab.\n"
              "Type or paste your text into the input area, then click Read to start playback."),
             ("Customising Your Experience",
              "Visit Voice Setting to choose the overlay shape, select a voice, adjust speed,\n"
