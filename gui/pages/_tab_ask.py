@@ -14,7 +14,7 @@ class _AskSignals(QObject):
     finished = pyqtSignal(str)
 
 class _AskThread(QThread):
-    def __init__(self, task, prompt, system, mixin, signals):
+    def __init__(self, task, prompt, mixin, system, signals):
         super().__init__()
         self._task = task
         self._prompt = prompt
@@ -217,7 +217,7 @@ class AskTabMixin:
 
         signals = _AskSignals()
         signals.finished.connect(lambda r: self._ask_on_response(r))
-        self._ask_thread = _AskThread("ask", prompt, system, self, signals)
+        self._ask_thread = _AskThread("ask", prompt, self, system, signals)
         self._ask_thread.start()
 
     def _ask_on_response(self, response: str):

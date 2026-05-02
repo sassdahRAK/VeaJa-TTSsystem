@@ -56,15 +56,15 @@ class DashboardMixin(
         lay.addWidget(self._tab_bar_widget)
 
         self._tab_stack = QStackedWidget()
-        self._tab_stack.addWidget(self._build_overlay_tab())                        # 0
-        self._tab_stack.addWidget(self._build_text_tab())                           # 1
-        self._tab_stack.addWidget(self._wrap_with_gate(self._build_summary_tab(),  2))  # 2
-        self._tab_stack.addWidget(self._wrap_with_gate(self._build_translate_tab(),3))  # 3
-        self._tab_stack.addWidget(self._wrap_with_gate(self._build_code_tab(),     4))  # 4
-        self._tab_stack.addWidget(self._wrap_with_gate(self._build_generate_tab(), 5))  # 5
-        self._tab_stack.addWidget(self._wrap_with_gate(self._build_ask_tab(),      6))  # 6
-        self._tab_stack.addWidget(self._build_live_caption_tab())                       # 7
-        self._tab_stack.addWidget(self._build_grammar_tab())                            # 8
+        self._tab_stack.addWidget(self._build_overlay_tab())                                    # 0
+        self._tab_stack.addWidget(self._build_text_tab())                                       # 1
+        self._tab_stack.addWidget(self._wrap_dev_lock(self._wrap_with_gate(self._build_summary_tab(),  2), 2, "Summary"))      # 2
+        self._tab_stack.addWidget(self._wrap_dev_lock(self._wrap_with_gate(self._build_translate_tab(),3), 3, "Translate"))    # 3
+        self._tab_stack.addWidget(self._wrap_dev_lock(self._wrap_with_gate(self._build_code_tab(),     4), 4, "Code"))         # 4
+        self._tab_stack.addWidget(self._wrap_dev_lock(self._wrap_with_gate(self._build_generate_tab(), 5), 5, "Generate"))     # 5
+        self._tab_stack.addWidget(self._wrap_dev_lock(self._wrap_with_gate(self._build_ask_tab(),      6), 6, "Ask"))          # 6
+        self._tab_stack.addWidget(self._wrap_dev_lock(self._build_live_caption_tab(),                  7, "Live Caption"))     # 7
+        self._tab_stack.addWidget(self._wrap_dev_lock(self._build_grammar_tab(),                       8, "Grammar"))          # 8
         lay.addWidget(self._tab_stack, 1)
         # Refresh lock icons after stack is built
         QTimer.singleShot(0, lambda: self._tab_bar_widget.refresh_lock_state())
@@ -155,6 +155,108 @@ class DashboardMixin(
 
         return wrapper
 
+    # ── Dev-lock wrapper ──────────────────────────────────────────────────────
+
+    def _wrap_dev_lock(self, content: QWidget, canonical_idx: int, name: str) -> QWidget:
+        """
+        Wraps a tab in a QStackedWidget:
+          index 0 — "under development" screen
+          index 1 — real content (shown after user clicks "I want to see")
+        The lock icon stays on the tab button even after dismissal.
+        """
+        if not hasattr(self, "_dev_unlocked"):
+            self._dev_unlocked: set = set()   # tabs the user has dismissed this session
+        if not hasattr(self, "_dev_lock_stacks"):
+            self._dev_lock_stacks: dict[int, QStackedWidget] = {}
+
+        wrapper = QStackedWidget()
+        wrapper.setObjectName("tabPage")
+
+        # ── Lock screen ───────────────────────────────────────────────────
+        lock_page = QWidget()
+        lock_page.setObjectName("tabPage")
+        lp_lay = QVBoxLayout(lock_page)
+        lp_lay.setContentsMargins(0, 0, 0, 0)
+        lp_lay.setSpacing(0)
+        lp_lay.addStretch(1)
+
+        center = QWidget()
+        center.setObjectName("tabPage")
+        c_lay = QVBoxLayout(center)
+        c_lay.setContentsMargins(20, 0, 20, 0)
+        c_lay.setSpacing(16)
+        c_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        icon_lbl = QLabel("🚧")
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("font-size: 80px; background: transparent;")
+        c_lay.addWidget(icon_lbl)
+
+        title_lbl = QLabel(f"Feature {name} under development")
+        title_lbl.setObjectName("pageTitle")
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_lbl.setWordWrap(False)
+        title_lbl.setStyleSheet("font-size: 22px; font-weight: 600;")
+        c_lay.addWidget(title_lbl)
+
+        sub_lbl = QLabel(
+            "This feature is actively being built. "
+            "It may be incomplete or change before the final release."
+        )
+        sub_lbl.setObjectName("settingsLabel")
+        sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub_lbl.setWordWrap(False)
+        sub_lbl.setStyleSheet("font-size: 14px;")
+        c_lay.addWidget(sub_lbl)
+
+        c_lay.addSpacing(8)
+
+        peek_btn = QPushButton("I want to see")
+        peek_btn.setObjectName("btnOutline")
+        peek_btn.setFixedHeight(50)
+        peek_btn.setMinimumWidth(220)
+        peek_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        def _peek_style(dark: bool) -> str:
+            if dark:
+                return ("QPushButton { background:#ffffff; color:#1a1a1a; "
+                        "border:none; border-radius:8px; font-weight:600; font-size:15px; }"
+                        "QPushButton:hover { background:#e0e0e0; }")
+            return ("QPushButton { background:#1a1a1a; color:#ffffff; "
+                    "border:none; border-radius:8px; font-weight:600; font-size:15px; }"
+                    "QPushButton:hover { background:#333333; }")
+
+        peek_btn.setStyleSheet(_peek_style(getattr(self, "_dark", True)))
+
+        # Re-apply style when theme toggles
+        _orig_apply = getattr(self, "_apply_theme", None)
+        if _orig_apply and not getattr(peek_btn, "_theme_hooked", False):
+            peek_btn._theme_hooked = True
+            if not hasattr(self, "_dev_lock_peek_btns"):
+                self._dev_lock_peek_btns: list = []
+            self._dev_lock_peek_btns.append((peek_btn, _peek_style))
+
+        def _unlock(idx=canonical_idx, w=wrapper):
+            self._dev_unlocked.add(idx)
+            w.setCurrentIndex(1)   # show content
+
+        peek_btn.clicked.connect(_unlock)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(peek_btn)
+        btn_row.addStretch()
+        c_lay.addLayout(btn_row)
+
+        lp_lay.addWidget(center)
+        lp_lay.addStretch(1)
+
+        wrapper.addWidget(lock_page)   # 0 — lock
+        wrapper.addWidget(content)     # 1 — content
+
+        self._dev_lock_stacks[canonical_idx] = wrapper
+        return wrapper
+
     def _has_any_api_key(self) -> bool:
         """Return True if the user has saved at least one non-empty API key."""
         if not hasattr(self, "_api_key_inputs"):
@@ -179,6 +281,15 @@ class DashboardMixin(
     def _switch_tab(self, canonical_idx: int):
         self._tab_stack.setCurrentIndex(canonical_idx)
         self._tab_bar_widget.set_active(canonical_idx)
+
+        # Show dev-lock screen if not yet dismissed this session
+        if hasattr(self, "_dev_lock_stacks"):
+            dev_stack = self._dev_lock_stacks.get(canonical_idx)
+            if dev_stack:
+                already_unlocked = canonical_idx in getattr(self, "_dev_unlocked", set())
+                dev_stack.setCurrentIndex(1 if already_unlocked else 0)
+                return   # don't also flip the API gate — dev lock takes priority
+
         # Show gate or content for gated tabs
         if canonical_idx in _GATED_TABS and hasattr(self, "_tab_gates"):
             gate_stack = self._tab_gates.get(canonical_idx)

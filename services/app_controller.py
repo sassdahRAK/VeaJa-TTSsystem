@@ -27,7 +27,7 @@ Component graph
 
 import platform
 
-from PyQt6.QtWidgets import QApplication, QDialog
+from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore    import QObject, QTimer
 
 from config.settings        import MAX_INPUT_CHARS
@@ -74,14 +74,20 @@ class AppController(QObject):
         # Tracks the text most recently sent to TTS for the ⟳ restart feature
         self._current_text: str = ""
 
+        # Debounce guard — prevents rapid clicks from queuing multiple
+        # stop/start cycles that overwhelm the TTS engine and crash the app.
+        self._action_pending: bool = False
+        self._last_action: str = ""
+
         # NetworkMonitor polls internet connectivity every 10 s in a background thread
         self._net_monitor = NetworkMonitor(parent=self, interval_ms=10_000)
 
         self._wire_signals()
         self._populate_voices()
 
-        # Reflect the correct online / offline state in the UI immediately
-        self._main_window.set_online_mode(self._tts.is_edge_available())
+        # Don't set online mode here — it will be restored from the profile
+        # in start() → apply_profile() to prevent crashes when reopening
+        # after a force quit while in offline mode.
 
         # macOS: keep the process alive when all windows are closed (live in tray)
         if platform.system() == "Darwin":
@@ -158,21 +164,16 @@ class AppController(QObject):
         """
         Called by main.py after the splash screen closes.
 
-        Loads the user profile, applies it to all components, shows the main
-        window, and (on first launch) presents the Terms dialog.
+        Mode is NOT set here — the NetworkMonitor fires its first check
+        immediately on construction and will call _on_connectivity_changed,
+        which sets the correct mode based on actual network state.
         """
         profile = self._profile.load()
         self._main_window.apply_profile(profile)
         self._overlay.apply_profile(profile)
-
-        # Push the saved dark/light theme to the overlay so it never relies
-        # solely on live QPalette detection at startup
         self._overlay.update_theme(self._is_dark_mode())
-
         self._wm.show_main()
 
-        # First-launch: show Terms dialog after a short delay so the window
-        # is fully painted before the modal appears
         if not profile.get("terms_accepted", False):
             QTimer.singleShot(600, self._show_terms_on_launch)
 
@@ -184,11 +185,16 @@ class AppController(QObject):
 
         Always stops any in-progress speech so the Read button starts fresh
         rather than toggling into pause/resume mode on new content.
+        New text always wins — it clears all debounce/stopping guards so the
+        user's latest selection is never silently dropped.
         """
         from PyQt6.QtGui import QCursor
 
-        # Stop current playback so the next action is always a fresh read
+        # Stop current playback so the next action is always a fresh read.
+        # Clear all guards first so the new speak() call is never blocked.
+        self._action_pending = False
         if self._tts.is_speaking() or self._tts.is_paused():
+            self._tts._stopping = False   # allow immediate new start
             self._tts.stop()
             self._on_speaking_finished()   # reset UI to IDLE immediately
 
@@ -209,18 +215,18 @@ class AppController(QObject):
         """
         Handle the global Ctrl+R hotkey.
 
-        Flow:
-          1. SelectionMonitor already simulated Ctrl+C → clipboard holds the
-             selected text from whatever app the user is in.
-          2. Load that text into the overlay and main window.
-          3. Show the overlay pill near the cursor (first appearance only).
-          4. Start reading immediately.
+        Always reads the latest clipboard text. Clears all guards so the
+        new read is never blocked by a previous stop/debounce cycle.
         """
         from PyQt6.QtGui import QCursor
 
         text = QApplication.clipboard().text().strip()
         if not text:
             return
+
+        # Clear guards so this fresh read is never silently dropped
+        self._action_pending = False
+        self._tts._stopping = False
 
         self._main_window.set_text(text)
         self._overlay.set_text(text, auto_show=False)
@@ -331,6 +337,8 @@ class AppController(QObject):
     def _stop_speaking(self) -> None:
         """Stop playback and reset all UI state to IDLE."""
         self._tts.stop()
+        # finished_speaking is disconnected by TTSEngine.stop() so we must
+        # reset the UI manually here.
         self._on_speaking_finished()
 
     def _pause_speaking(self) -> None:
@@ -352,29 +360,75 @@ class AppController(QObject):
         """
         Handle a tap on the overlay pill while TTS is active.
 
-        • Speaking  → pause
-        • Paused    → resume
-        • Idle      → stop (safety fallback)
+        Debounce rules:
+        - Pause/resume: instant, no debounce (lightweight pygame calls)
+        - Stop (idle state): 200ms debounce to absorb accidental double-clicks
+        - Same action repeated within 200ms: ignored
+        - Different action (e.g. pause then stop): always allowed
         """
         if self._tts.is_paused():
+            # Resume is instant — no debounce
+            self._last_action = "resume"
             self._resume_speaking()
+
         elif self._tts.is_speaking():
+            # Pause is instant — no debounce
+            self._last_action = "pause"
             self._pause_speaking()
+
         else:
+            # Stop from idle — debounce only same-action repeats
+            if self._action_pending and self._last_action == "stop":
+                return
+            self._action_pending = True
+            self._last_action = "stop"
+            QTimer.singleShot(200, self._clear_action_pending)
             self._stop_speaking()
+
+    def _clear_action_pending(self):
+        self._action_pending = False
 
     def _on_reset_requested(self) -> None:
         """
-        Handle the ⟳ reset button on the overlay pill.
-
-        Stops the current read and restarts from the beginning of the same text
-        after a 200 ms delay to allow the TTS engine to clean up gracefully.
+        Smart restart:
+        - Clipboard has NEW text  → stop old, speak new
+        - Same text (or empty)    → restart from beginning (uses WAV cache if available)
         """
-        if not self._current_text:
+        if self._action_pending and self._last_action == "reset":
             return
-        self._tts.stop()
-        self._on_speaking_finished()
-        QTimer.singleShot(200, lambda: self._speak(self._current_text))
+        self._action_pending = True
+        self._last_action = "reset"
+
+        clipboard_text = QApplication.clipboard().text().strip()
+        current_text   = self._current_text.strip()
+
+        # Normalize both for comparison — strip whitespace differences
+        is_new_text = bool(clipboard_text and clipboard_text != current_text)
+
+        if is_new_text:
+            new_text = clipboard_text
+            self._tts.stop()
+            self._on_speaking_finished()
+            self._overlay.set_text(new_text, auto_show=False)
+            self._main_window.set_text(new_text)
+            def _do_new():
+                self._action_pending = False
+                self._speak(new_text)
+            QTimer.singleShot(300, _do_new)
+        else:
+            if not current_text:
+                self._action_pending = False
+                return
+            # Clear WAV cache so the same text is re-rendered fresh from start
+            # (don't reuse mid-stream cache — restart means from sentence 1)
+            self._tts._clear_wav_cache()
+            text = current_text
+            self._tts.stop()
+            self._on_speaking_finished()
+            def _do_restart():
+                self._action_pending = False
+                self._speak(text)
+            QTimer.singleShot(300, _do_restart)
 
     # ── TTS lifecycle callbacks ────────────────────────────────────────────────
 
@@ -382,6 +436,9 @@ class AppController(QObject):
         """TTS engine is fetching / synthesising audio (not yet playing)."""
         self._overlay.set_processing(True)
         self._main_window.set_read_state(ReadState.PROCESSING)
+        # Safety watchdog — if we stay in PROCESSING for more than 30s
+        # something went wrong silently; force-reset the UI.
+        self._reset_watchdog(30_000)
 
     def _on_speaking_started(self) -> None:
         """Audio playback has begun."""
@@ -389,10 +446,10 @@ class AppController(QObject):
         self._overlay.set_speaking(True)
         self._main_window.set_read_state(ReadState.SPEAKING)
         self._main_window.mark_reading_started(self._current_text)
-        # Only show overlay if the read was triggered externally (clipboard/hotkey),
-        # not from a dashboard Read button (_silent_read flag suppresses it)
         if not self._overlay.isVisible() and not getattr(self, "_silent_read", False):
             self._overlay.show_overlay()
+        # Refresh watchdog — now in SPEAKING state
+        self._reset_watchdog(None)   # cancel processing watchdog
 
     def _on_speaking_paused(self) -> None:
         """Audio playback has been paused."""
@@ -408,16 +465,37 @@ class AppController(QObject):
 
     def _on_speaking_finished(self) -> None:
         """Audio playback has ended (naturally or was stopped)."""
+        self._reset_watchdog(None)   # cancel any pending watchdog
+        self._action_pending = False
         self._silent_read = False
         self._overlay.set_processing(False)
         self._overlay.set_speaking(False)
         self._overlay.set_paused(False)
         self._main_window.set_read_state(ReadState.IDLE)
         self._main_window.clear_highlight()
-        self._main_window.mark_reading_started("")   # nothing is playing now
-        # If main window is visible, hide the overlay again (it was auto-shown)
+        self._main_window.mark_reading_started("")
         if self._main_window.isVisible() and self._overlay.isVisible():
             self._overlay.hide_overlay()
+
+    def _reset_watchdog(self, ms: int | None) -> None:
+        """
+        Start or cancel the UI-stuck watchdog timer.
+        ms=None cancels it. ms=N fires _on_speaking_finished after N ms
+        if the engine hasn't reported back by then.
+        """
+        if not hasattr(self, "_watchdog_timer"):
+            self._watchdog_timer = QTimer(self)
+            self._watchdog_timer.setSingleShot(True)
+            self._watchdog_timer.timeout.connect(self._on_watchdog_fired)
+        self._watchdog_timer.stop()
+        if ms is not None:
+            self._watchdog_timer.start(ms)
+
+    def _on_watchdog_fired(self) -> None:
+        """Force-reset the UI if TTS got stuck without emitting finished_speaking."""
+        self._tts._stopping = False
+        self._tts.stop()
+        self._on_speaking_finished()
 
     def _on_speaking_error(self, msg: str) -> None:
         """TTS raised an error — reset UI and show a tray notification."""
@@ -428,29 +506,23 @@ class AppController(QObject):
 
     def _on_mode_changed(self, online: bool) -> None:
         """
-        User toggled the Online / Offline switch in the Settings page.
+        User manually toggled Online / Offline in the Settings page.
 
-        Updates the TTS engine mode and refreshes the voice selector so it
-        shows only voices relevant to the new mode.
-
-        voice_index clamp
-        -----------------
-        Online mode has 8 voices; offline mode may have fewer system voices.
-        A saved voice_index of 7 would be out of range after switching to
-        offline. We clamp it to 0 and persist the correction so the UI and
-        the engine always stay in sync.
+        WiFi is still connected — user is free to switch. We apply the choice
+        immediately and save it. The NetworkMonitor will override this if the
+        network state changes.
         """
         self._tts.set_forced_offline(not online)
         voices = self._tts.get_voices()
         self._main_window.populate_voices(voices)
 
-        # Clamp the saved voice_index to the valid range for the new mode
+        profile = self._profile.get()
         if voices:
-            profile = self._profile.get()
             voice_index = profile.get("voice_index", 0)
             if not isinstance(voice_index, int) or voice_index >= len(voices):
                 profile["voice_index"] = 0
-                self._profile.save(profile)
+        profile["user_mode_preference"] = "online" if online else "offline"
+        self._profile.save(profile)
 
     def _on_settings_save(self, settings: dict) -> None:
         """Merge the changed settings into the user profile and persist to disk."""
@@ -469,29 +541,35 @@ class AppController(QObject):
 
     def _on_connectivity_changed(self, is_online: bool) -> None:
         """
-        NetworkMonitor detected an internet state change.
+        Network state changed — always follow it, no exceptions.
 
-        Going offline:
-          • Forces TTS to offline mode immediately to prevent edge-tts crashes.
-          • Updates the status label in the Settings page.
+        WiFi goes OFF  →  force offline immediately (prevents edge-tts crashes)
+        WiFi comes ON  →  force online immediately (if edge-tts available)
 
-        Coming back online:
-          • Restores online mode if edge-tts is available.
-          • Refreshes the voice list so online voices appear again.
+        Manual user selection is irrelevant here — network state always wins.
+        The user can still toggle manually while the network stays stable.
         """
-        # Update the status label and lock / unlock the online checkbox
         self._main_window.update_connection_status(is_online)
 
-        if not is_online:
-            # Auto-switch to offline to avoid network errors on next read
-            self._tts.set_forced_offline(True)
+        if is_online and self._tts.is_edge_available():
+            # Network came back — go online unconditionally
+            self._tts.set_forced_offline(False)
+            self._main_window.set_online_mode(True)
             self._main_window.populate_voices(self._tts.get_voices())
+            self._tray.show_notification(
+                "Veaja — Back online",
+                "Internet restored. Switched to online mode."
+            )
         else:
-            # Internet is back — restore online mode if the engine supports it
-            if self._tts.is_edge_available():
-                self._tts.set_forced_offline(False)
-                self._main_window.set_online_mode(True)
-                self._main_window.populate_voices(self._tts.get_voices())
+            # Network dropped — go offline unconditionally
+            self._tts.set_forced_offline(True)
+            self._main_window.set_online_mode(False)
+            self._main_window.populate_voices(self._tts.get_voices())
+            if not is_online:
+                self._tray.show_notification(
+                    "Veaja — No internet",
+                    "Switched to offline mode automatically."
+                )
 
     def _on_theme_changed(self, dark: bool) -> None:
         """
@@ -511,28 +589,31 @@ class AppController(QObject):
 
     def _show_terms_on_launch(self) -> None:
         """
-        Show the Terms dialog on first launch.
-
-        If the user accepts and ticks "Don't show again", the preference is
-        persisted so the dialog never appears again.
+        Show the Terms dialog on first launch — non-modal so the overlay
+        stays interactive while the user reads the notice.
         """
         dlg = TermsDialog(
             online_mode=self._tts.is_edge_available(),
             dark=getattr(self._main_window, "_dark", self._is_dark_mode()),
             parent=self._main_window,
         )
-        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.dont_show_again():
-            profile = self._profile.get()
-            profile["terms_accepted"] = True
-            self._profile.save(profile)
+        # Non-modal: connect accepted signal instead of blocking with exec()
+        def _on_accepted():
+            if dlg.dont_show_again():
+                profile = self._profile.get()
+                profile["terms_accepted"] = True
+                self._profile.save(profile)
+        dlg.accepted.connect(_on_accepted)
+        dlg.show()
 
     def _show_terms(self) -> None:
-        """Show the Terms dialog on demand (from the sidebar link)."""
-        TermsDialog(
+        """Show the Terms dialog on demand — non-modal."""
+        dlg = TermsDialog(
             online_mode=self._tts.is_edge_available(),
             dark=getattr(self._main_window, "_dark", self._is_dark_mode()),
             parent=self._main_window,
-        ).exec()
+        )
+        dlg.show()
 
     # ── Profile ───────────────────────────────────────────────────────────────
 
@@ -583,9 +664,20 @@ class AppController(QObject):
 
     def _quit(self) -> None:
         """Gracefully shut down all background components before exiting."""
-        self._monitor.stop()   # stop the global hotkey listener thread
-        self._tts.stop()       # stop any in-progress TTS playback
-        self._tray.hide()      # remove the system tray icon
+        try:
+            self._net_monitor._timer.stop()
+        except Exception:
+            pass
+
+        self._monitor.stop()
+
+        try:
+            self._tts.stop()
+            self._tts._clear_wav_cache()   # delete any cached WAV files from disk
+        except Exception:
+            pass
+
+        self._tray.hide()
         QApplication.quit()
 
     # ── Helpers ───────────────────────────────────────────────────────────────

@@ -68,6 +68,13 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+**Linux users:** For offline mode, install espeak:
+```bash
+sudo apt install espeak espeak-ng  # Ubuntu/Debian
+sudo dnf install espeak espeak-ng  # Fedora
+sudo pacman -S espeak-ng           # Arch
+```
+
 ### 4. Run the app
 
 ```bash

@@ -168,7 +168,7 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self.setMinimumSize(scaled(780), scaled(580))
         self.resize(scaled(900), scaled(660))
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
-        self._title_bar_height = scaled(38)
+        self._title_bar_height = 38   # fixed px — never scales with DPI or window size
         self._title_bar_widget: QWidget | None = None
         self._title_bar_label: QLabel | None = None
         self._max_btn: QPushButton | None = None
@@ -671,6 +671,9 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self._vol_slider.blockSignals(False)
         if self._tts:
             self._tts.set_volume(vol_f)
+
+        # Online/offline mode is managed by AppController via _apply_effective_mode()
+        # based on both network state and user preference — don't set it here.
 
         # Voice index (applied after voice list is populated)
         idx = int(profile.get("voice_index", 0))

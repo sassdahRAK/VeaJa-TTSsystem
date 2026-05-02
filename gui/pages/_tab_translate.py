@@ -279,6 +279,11 @@ class TranslateTabMixin:
             from PyQt6.QtCore import QSize
             self._tr_swap_btn.setIcon(self._tr_svg_icon(self._tr_swap_svg))
             self._tr_swap_btn.setIconSize(QSize(16, 16))
+        """Re-render theme-sensitive icons on the translate tab (called on theme toggle)."""
+        if hasattr(self, "_tr_swap_btn") and hasattr(self, "_tr_swap_svg"):
+            from PyQt6.QtCore import QSize
+            self._tr_swap_btn.setIcon(self._tr_svg_icon(self._tr_swap_svg))
+            self._tr_swap_btn.setIconSize(QSize(16, 16))
 
     def _swap_translate_langs(self):
         """Swap From and To language selections, and swap the text content."""

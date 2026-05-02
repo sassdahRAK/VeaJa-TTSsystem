@@ -30,6 +30,8 @@ DEFAULT_PROFILE: dict = {
     "overlay_anim_spin": True,         # spin logo while reading
     "voice_index":       0,            # index into the current voice list
     "volume":          1.0,          # 0.0–1.0
+    "forced_offline":  False,        # legacy — kept for migration compatibility
+    "user_mode_preference": None,    # "online" | "offline" | None (follow network)
     "tab_order":       [0, 1, 2, 3, 4, 5, 6, 7, 8], # dashboard tab display order
     "nav_order":       [1, 7, 8, 2],  # sidebar nav display order (page indices)
     # API keys (stored locally, never transmitted except to the chosen provider)

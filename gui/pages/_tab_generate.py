@@ -1,14 +1,102 @@
 """gui/pages/_tab_generate.py — Generate tab for the Dashboard."""
 
+import os
+import json
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QApplication
+    QTextEdit, QApplication, QSizePolicy
 )
 from gui._window_shared import scaled  # noqa: F401
-from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QByteArray
 
 from gui.pages._flow_layout import FlowLayout as _FlowLayout
 from gui.pages._ai_caller import call_ai, get_api_keys, best_provider
+
+# ── Preview image data ────────────────────────────────────────────────────────
+_PREVIEWS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "generate_previews.json")
+
+def _load_previews() -> dict:
+    try:
+        path = os.path.normpath(_PREVIEWS_PATH)
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+_PREVIEWS = _load_previews()
+
+
+# ── Full-bleed background image widget ───────────────────────────────────────
+
+class _HeroBgWidget(QWidget):
+    """
+    A widget that paints a QPixmap scaled to cover its entire area (like
+    CSS background-size: cover).  Children are laid out normally on top.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap = None
+
+    def set_pixmap(self, px):
+        self._pixmap = px
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self._pixmap or self._pixmap.isNull():
+            return
+        from PyQt6.QtGui import QPainter
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        # Scale to cover — fill the widget, crop excess
+        w, h = self.width(), self.height()
+        px = self._pixmap
+        scale = max(w / px.width(), h / px.height())
+        new_w = int(px.width()  * scale)
+        new_h = int(px.height() * scale)
+        x = (w - new_w) // 2
+        y = (h - new_h) // 2
+        scaled = px.scaled(
+            new_w, new_h,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        painter.drawPixmap(x, y, scaled)
+        # Dark gradient overlay so the input card text stays readable
+        from PyQt6.QtGui import QLinearGradient, QColor, QBrush
+        grad = QLinearGradient(0, 0, 0, h)
+        grad.setColorAt(0.0, QColor(0, 0, 0, 30))
+        grad.setColorAt(0.6, QColor(0, 0, 0, 80))
+        grad.setColorAt(1.0, QColor(0, 0, 0, 200))
+        painter.fillRect(0, 0, w, h, QBrush(grad))
+        painter.end()
+
+
+# ── Background worker for fetching preview images ─────────────────────────────
+
+class _ImgSignals(QObject):
+    loaded = pyqtSignal(bytes)
+    failed = pyqtSignal()
+
+class _ImgFetchThread(QThread):
+    def __init__(self, url: str, signals: _ImgSignals):
+        super().__init__()
+        self._url     = url
+        self._signals = signals
+
+    def run(self):
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                self._url,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = resp.read()
+            self._signals.loaded.emit(data)
+        except Exception:
+            self._signals.failed.emit()
 
 
 # ── Background worker ─────────────────────────────────────────────────────────
@@ -75,9 +163,14 @@ class GenerateTabMixin:
             self._gen_mode_btns.append(btn)
         lay.addWidget(mode_bar)
 
-        # Input area
+        # Input area — transparent so the hero background shows through
         input_card = QWidget()
         input_card.setObjectName("featureBox")
+        input_card.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        input_card.setStyleSheet(
+            "#featureBox, QWidget#featureBox { background: rgba(20,20,20,0.72); "
+            "border-radius: 10px; }"
+        )
         ic_lay = QVBoxLayout(input_card)
         ic_lay.setContentsMargins(0, 0, 0, 0)
         ic_lay.setSpacing(6)
@@ -95,26 +188,75 @@ class GenerateTabMixin:
         self._gen_text_input.setFixedHeight(100)
         ic_lay.addWidget(self._gen_text_input)
 
-        # Attachment row
+        # Attachment + action row — all on the same line
         attach_row = QHBoxLayout()
-        attach_row.setSpacing(8)
-        attach_row.setContentsMargins(0, 0, 0, 0)
+        attach_row.setSpacing(6)
+        attach_row.setContentsMargins(0, 4, 0, 0)
+
         attach_lbl = QLabel("Attach:")
         attach_lbl.setObjectName("featureLabel")
         attach_row.addWidget(attach_lbl)
-        for icon, tip, slot in [
-            ("🖼", "Image (jpg/png/webp)", self._gen_attach_image),
-            ("📄", "PDF document",         self._gen_attach_pdf),
-            ("📁", "Folder",               self._gen_attach_folder),
-            ("🔗", "URL / Link",           self._gen_attach_url),
+
+        # Attach buttons with inline SVG icons rendered via QPixmap
+        self._gen_attach_btns: list[tuple] = []   # (btn, svg_body) for theme refresh
+        for svg_body, tip, slot in [
+            # Image — landscape photo icon
+            (
+                '<rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6" fill="none"/>'
+                '<circle cx="8.5" cy="10.5" r="1.5" fill="currentColor"/>'
+                '<path d="M3 16l4-4 3 3 3-4 5 5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>',
+                "Image", self._gen_attach_image,
+            ),
+            # PDF — document with lines icon
+            (
+                '<path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="1.6" fill="none"/>'
+                '<path d="M14 2v4h4" stroke="currentColor" stroke-width="1.6" fill="none"/>'
+                '<path d="M8 13h8M8 17h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+                "PDF", self._gen_attach_pdf,
+            ),
+            # Folder — open folder icon
+            (
+                '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.6" fill="none"/>',
+                "Folder", self._gen_attach_folder,
+            ),
+            # URL — chain link icon
+            (
+                '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>'
+                '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+                "URL", self._gen_attach_url,
+            ),
         ]:
-            btn = QPushButton(f"{icon}  {tip.split()[0]}")
+            btn = QPushButton(f" {tip}")
             btn.setObjectName("btnOutline")
-            btn.setFixedHeight(28)
+            btn.setFixedHeight(30)
             btn.setToolTip(tip)
+            btn.setIcon(self._gen_svg_icon(svg_body))
+            from PyQt6.QtCore import QSize
+            btn.setIconSize(QSize(15, 15))
             btn.clicked.connect(slot)
             attach_row.addWidget(btn)
+            self._gen_attach_btns.append((btn, svg_body))
+
         attach_row.addStretch()
+
+        # AI provider indicator
+        self._gen_ai_lbl = QLabel("")
+        self._gen_ai_lbl.setObjectName("settingsLabel")
+        self._gen_ai_lbl.setStyleSheet("font-size: 10px; color: #888;")
+        attach_row.addWidget(self._gen_ai_lbl)
+
+        clear_btn = QPushButton("Clear")
+        clear_btn.setObjectName("btnOutline")
+        clear_btn.setFixedSize(72, 30)
+        clear_btn.clicked.connect(self._clear_generate)
+        attach_row.addWidget(clear_btn)
+
+        self._gen_btn = QPushButton("Generate")
+        self._gen_btn.setObjectName("btnPrimary")
+        self._gen_btn.setFixedSize(100, 30)
+        self._gen_btn.clicked.connect(self._run_generate)
+        attach_row.addWidget(self._gen_btn)
+
         ic_lay.addLayout(attach_row)
 
         self._gen_attachments: list[str] = []
@@ -124,30 +266,26 @@ class GenerateTabMixin:
         self._gen_attach_lbl.setStyleSheet("font-size: 11px;")
         self._gen_attach_lbl.setVisible(False)
         ic_lay.addWidget(self._gen_attach_lbl)
-        lay.addWidget(input_card)
 
-        # Generate button row
-        gen_row = QHBoxLayout()
-        gen_row.setContentsMargins(0, 0, 0, 0)
-        gen_row.addStretch()
+        # ── Hero container: full-bleed background image + input card overlay ──
+        # The hero widget fills all remaining vertical space. The background
+        # image is painted to cover the entire area; the input card sits at
+        # the bottom, semi-transparent, so the image shows behind it.
+        self._gen_hero = _HeroBgWidget()
+        self._gen_hero.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        hero_lay = QVBoxLayout(self._gen_hero)
+        hero_lay.setContentsMargins(0, 0, 0, 0)
+        hero_lay.setSpacing(0)
+        hero_lay.addStretch(1)          # push input card to the bottom
+        hero_lay.addWidget(input_card)  # input card sits at the bottom of the hero
 
-        # AI provider indicator
-        self._gen_ai_lbl = QLabel("")
-        self._gen_ai_lbl.setObjectName("settingsLabel")
-        self._gen_ai_lbl.setStyleSheet("font-size: 10px; color: #888;")
-        gen_row.addWidget(self._gen_ai_lbl)
+        lay.addWidget(self._gen_hero, 1)
 
-        clear_btn = QPushButton("Clear")
-        clear_btn.setObjectName("btnOutline")
-        clear_btn.setFixedSize(80, 30)
-        clear_btn.clicked.connect(self._clear_generate)
-        gen_row.addWidget(clear_btn)
-        self._gen_btn = QPushButton("Generate")
-        self._gen_btn.setObjectName("btnPrimary")
-        self._gen_btn.setFixedSize(110, 30)
-        self._gen_btn.clicked.connect(self._run_generate)
-        gen_row.addWidget(self._gen_btn)
-        lay.addLayout(gen_row)
+        self._gen_img_threads: list = []   # keep thread refs alive
+        # Load the first mode's preview immediately
+        self._load_gen_preview(0)
 
         # Output
         self._gen_out_lbl = QLabel("Output")
@@ -198,13 +336,52 @@ class GenerateTabMixin:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
+    def _gen_svg_icon(self, svg_body: str, size: int = 16):
+        """Render an SVG path string into a QIcon, respecting dark/light theme."""
+        from PyQt6.QtSvg import QSvgRenderer
+        from PyQt6.QtGui import QPixmap, QPainter, QIcon, QColor
+        from PyQt6.QtWidgets import QApplication
+        is_dark = getattr(self, "_dark", True)
+        color = "#ffffff" if is_dark else "#333333"
+        # Replace currentColor with the resolved color so it renders correctly
+        svg_colored = svg_body.replace("currentColor", color)
+        svg = (
+            f'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+            f'<g stroke="{color}" fill="none">{svg_colored}</g>'
+            f'</svg>'
+        ).encode()
+        app = QApplication.instance()
+        dpr = app.primaryScreen().devicePixelRatio() if app and app.primaryScreen() else 1.0
+        phys = int(size * dpr)
+        px = QPixmap(phys, phys)
+        px.fill(QColor(0, 0, 0, 0))
+        renderer = QSvgRenderer(svg)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        renderer.render(p)
+        p.end()
+        px.setDevicePixelRatio(dpr)
+        return QIcon(px)
+
     def _gen_mode_description(self, idx: int) -> str:
         return self._GEN_DESCRIPTIONS[idx] if idx < len(self._GEN_DESCRIPTIONS) else ""
+
+    def refresh_generate_icons(self):
+        """Re-render theme-sensitive attach icons (called on theme toggle)."""
+        if not hasattr(self, "_gen_attach_btns"):
+            return
+        from PyQt6.QtCore import QSize
+        for btn, svg_body in self._gen_attach_btns:
+            btn.setIcon(self._gen_svg_icon(svg_body))
+            btn.setIconSize(QSize(15, 15))
 
     def _switch_gen_mode(self, idx: int):
         for i, btn in enumerate(self._gen_mode_btns):
             btn.setChecked(i == idx)
         self._gen_mode_desc.setText(self._gen_mode_description(idx))
+        # Reload preview image for the new mode (only if output is hidden)
+        if hasattr(self, "_gen_hero") and self._gen_hero.isVisible():
+            self._load_gen_preview(idx)
 
     def _current_gen_mode(self) -> str:
         for i, btn in enumerate(self._gen_mode_btns):
@@ -218,6 +395,42 @@ class GenerateTabMixin:
             self._gen_attach_lbl.setVisible(True)
         else:
             self._gen_attach_lbl.setVisible(False)
+
+    def _load_gen_preview(self, idx: int):
+        """Fetch and display the preview image for the given mode index."""
+        if not hasattr(self, "_gen_hero"):
+            return
+        mode = self._gen_modes[idx] if idx < len(self._gen_modes) else "Poster"
+        entry = _PREVIEWS.get(mode, {})
+        url = entry.get("url", "")
+        if not url:
+            self._gen_hero.set_pixmap(None)
+            return
+        signals = _ImgSignals()
+        signals.loaded.connect(lambda data, m=mode: self._on_preview_loaded(data, m))
+        signals.failed.connect(lambda m=mode: self._on_preview_failed(m))
+        t = _ImgFetchThread(url, signals)
+        self._gen_img_threads.append(t)
+        t.start()
+
+    def _on_preview_loaded(self, data: bytes, mode: str):
+        """Paint the downloaded image as the hero background."""
+        if not hasattr(self, "_gen_hero"):
+            return
+        if self._current_gen_mode() != mode:
+            return
+        from PyQt6.QtGui import QPixmap
+        px = QPixmap()
+        px.loadFromData(QByteArray(data))
+        if not px.isNull():
+            self._gen_hero.set_pixmap(px)
+
+    def _on_preview_failed(self, mode: str):
+        if not hasattr(self, "_gen_hero"):
+            return
+        if self._current_gen_mode() != mode:
+            return
+        self._gen_hero.set_pixmap(None)
 
     def _gen_attach_image(self):
         from PyQt6.QtWidgets import QFileDialog
@@ -256,6 +469,11 @@ class GenerateTabMixin:
         self._gen_output.setVisible(False)
         self._gen_out_lbl.setVisible(False)
         self._gen_export_row.setVisible(False)
+        # Show hero preview again after clearing
+        if hasattr(self, "_gen_hero"):
+            self._gen_hero.setVisible(True)
+            idx = next((i for i, b in enumerate(self._gen_mode_btns) if b.isChecked()), 0)
+            self._load_gen_preview(idx)
 
     def _run_generate(self):
         text = self._gen_text_input.toPlainText().strip()
@@ -276,6 +494,9 @@ class GenerateTabMixin:
             self._gen_output.setPlainText("Generating…")
             self._gen_output.setVisible(True)
             self._gen_out_lbl.setVisible(True)
+            # Hide hero while output is shown
+            if hasattr(self, "_gen_hero"):
+                self._gen_hero.setVisible(False)
 
             system, prompt = self._build_gen_prompt(mode, text)
             signals = _GenSignals()
@@ -292,6 +513,8 @@ class GenerateTabMixin:
             self._gen_export_row.setVisible(True)
             if hasattr(self, "_gen_preview_btn"):
                 self._gen_preview_btn.setVisible(mode == "HTML")
+            if hasattr(self, "_gen_hero"):
+                self._gen_hero.setVisible(False)
 
     def _on_gen_finished(self, result: str):
         self._gen_btn.setEnabled(True)

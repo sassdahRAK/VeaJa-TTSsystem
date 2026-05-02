@@ -643,6 +643,46 @@ class CodeTabMixin:
 
         self._code_grid_lbl.setVisible(True)
 
+        # Fire async AI overview (enriches the summary label when ready)
+        self._run_code_ai_overview(code, lang, overall)
+
+    def _run_code_ai_overview(self, code: str, lang: str, local_summary: str):
+        """Asynchronously fetch an AI-generated one-line overview of the code."""
+        from gui.pages._ai_caller import call_ai, get_api_keys, best_provider
+
+        keys = get_api_keys(self)
+        if not best_provider("code", keys):
+            return  # No key — keep local summary
+
+        class _OvSignals(QObject):
+            done = pyqtSignal(str)
+
+        class _OvThread(QThread):
+            def __init__(self, code, lang, mixin, signals):
+                super().__init__()
+                self._code = code; self._lang = lang
+                self._mixin = mixin; self._signals = signals
+
+            def run(self):
+                system = (
+                    "You are a senior code reviewer. "
+                    "Write a single concise sentence (max 20 words) describing what this code does. "
+                    "No bullet points, no markdown, just one plain sentence."
+                )
+                snippet = self._code[:1500] + ("…" if len(self._code) > 1500 else "")
+                prompt  = f"Language: {self._lang}\n\nCode:\n{snippet}"
+                result  = call_ai("code", prompt, self._mixin, system)
+                self._signals.done.emit(result)
+
+        self._ov_signals = _OvSignals()
+        self._ov_signals.done.connect(
+            lambda r: self._code_summary_lbl.setText(
+                f"<b>Overview:</b> {local_summary} — {r}"
+            )
+        )
+        self._ov_thread = _OvThread(code, lang, self, self._ov_signals)
+        self._ov_thread.start()
+
     def _extract_code_items(self, code: str) -> list[dict]:
         lang = getattr(self, "_code_lang", None)
         lang_name = lang.currentText().lower() if lang else "python"
@@ -1225,12 +1265,16 @@ class _CodeKeyPointRow(QWidget):
 
         name_lbl = QLabel(item["name"])
         name_lbl.setObjectName("cardTitle")
-        name_lbl.setFixedWidth(140)
+        name_lbl.setMinimumWidth(60)
+        name_lbl.setMaximumWidth(160)
+        name_lbl.setWordWrap(False)
+        name_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         h_lay.addWidget(name_lbl)
 
         role_lbl = QLabel(item["role"])
         role_lbl.setObjectName("cardBody")
         role_lbl.setStyleSheet("font-size: 12px;")
+        role_lbl.setWordWrap(False)
         h_lay.addWidget(role_lbl, 1)
 
         # ▶ Run button — runs without expanding
@@ -1560,6 +1604,7 @@ class _SubPointRow(QWidget):
         title_lbl = QLabel(title)
         title_lbl.setObjectName("cardBody")
         title_lbl.setStyleSheet("font-size: 11px; font-weight: 600;")
+        title_lbl.setWordWrap(True)
         h_lay.addWidget(title_lbl, 1)
 
         # Read sub-point

@@ -1,0 +1,50 @@
+{
+  "Poster": {
+    "url": "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=800&q=80",
+    "caption": "Create a visual poster layout with headline, body and call-to-action."
+  },
+  "Prompt": {
+    "url": "https://images.unsplash.com/photo-1677442135703-1787eea5ce01?w=800&q=80",
+    "caption": "Craft detailed AI prompts for image, text or code generation."
+  },
+  "Instruction": {
+    "url": "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=800&q=80",
+    "caption": "Generate step-by-step instructions or how-to guides."
+  },
+  "Caption": {
+    "url": "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800&q=80",
+    "caption": "Write engaging captions for social media posts and images."
+  },
+  "Adjust": {
+    "url": "https://images.unsplash.com/photo-1542744094-3a31f272c490?w=800&q=80",
+    "caption": "Rewrite, rephrase or adjust the tone of existing text."
+  },
+  "Slide": {
+    "url": "https://images.unsplash.com/photo-1557804506-669a67965ba0?w=800&q=80",
+    "caption": "Generate structured slide decks and presentation outlines."
+  },
+  "Video": {
+    "url": "https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=800&q=80",
+    "caption": "Create video scripts, storyboards and scene descriptions."
+  },
+  "HTML": {
+    "url": "https://images.unsplash.com/photo-1621839673705-6617adf9e890?w=800&q=80",
+    "caption": "Generate complete HTML pages with CSS and JavaScript."
+  },
+  "Web": {
+    "url": "https://images.unsplash.com/photo-1547658719-da2b51169166?w=800&q=80",
+    "caption": "Design full web layouts, landing pages and UI components."
+  },
+  "App": {
+    "url": "https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=800&q=80",
+    "caption": "Scaffold app screens, flows and component structures."
+  },
+  "Network": {
+    "url": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800&q=80",
+    "caption": "Generate network diagrams, topology maps and config templates."
+  },
+  "Quiz": {
+    "url": "https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=800&q=80",
+    "caption": "Create quizzes, flashcards and knowledge-check questions."
+  }
+}

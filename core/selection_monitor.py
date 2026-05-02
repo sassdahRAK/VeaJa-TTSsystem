@@ -74,7 +74,13 @@ class SelectionMonitor(QObject):
 
     @pyqtSlot()
     def _on_clipboard_change(self):
-        text = self._clipboard.text().strip()
+        # Guard: skip immediately if clipboard contains non-text data (image, file, etc.)
+        # Accessing image/file data on the main thread can cause a freeze.
+        cb = self._clipboard
+        mime = cb.mimeData()
+        if mime is None or not mime.hasText():
+            return
+        text = cb.text().strip()
         if text and text != self._last_text:
             self._emit_if_allowed(text)
 
@@ -172,23 +178,23 @@ class SelectionMonitor(QObject):
 
     @pyqtSlot()
     def _emit_read_hotkey(self):
-        """Read clipboard and fire the public read_clipboard_hotkey signal.
-
-        The clipboard is cleared 500 ms after reading so that sensitive data
-        (passwords, API keys, medical text) does not linger and remain
-        accessible to other apps or clipboard-history tools.
-        """
+        """Read clipboard and fire the public read_clipboard_hotkey signal."""
+        # Guard: skip if clipboard has no text (e.g. image was copied)
+        mime = self._clipboard.mimeData()
+        if mime is None or not mime.hasText():
+            return
         text = self._clipboard.text().strip()
         if text:
             self.read_clipboard_hotkey.emit()
-            # Delay the clear slightly so the app has time to consume the text
-            # before we wipe it. The 500 ms window is enough for _on_read_hotkey
-            # to call set_text() / speak() before the clipboard is emptied.
             QTimer.singleShot(500, self._clipboard.clear)
 
     @pyqtSlot()
     def _force_check(self):
         """Re-read clipboard even if the dataChanged signal did not fire."""
+        # Guard: skip if clipboard has no text (e.g. image was copied)
+        mime = self._clipboard.mimeData()
+        if mime is None or not mime.hasText():
+            return
         text = self._clipboard.text().strip()
         if text and text != self._last_text:
             self._emit_if_allowed(text)

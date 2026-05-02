@@ -93,6 +93,24 @@ def main() -> None:
     app = QApplication(sys.argv)
     _configure_app(app)
 
+    # ── Check for espeak on Linux (required for offline mode) ────────────
+    if platform.system() == "Linux":
+        import shutil
+        if not shutil.which("espeak") and not shutil.which("espeak-ng"):
+            from PyQt6.QtWidgets import QMessageBox
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setWindowTitle("Veaja — Offline Mode Unavailable")
+            msg.setText("Espeak not found")
+            msg.setInformativeText(
+                "Offline text-to-speech requires espeak.\n\n"
+                "Install it with:\n"
+                "  sudo apt install espeak espeak-ng\n\n"
+                "Online mode (edge-tts) will still work with internet."
+            )
+            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+            msg.exec()
+
     # ── 1. Splash screen — read saved theme before building anything ─────
     _saved_dark: bool | None = None
     try:

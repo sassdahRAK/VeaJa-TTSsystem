@@ -406,22 +406,43 @@ class EdgeTTSWorker(QThread):
         self._pause_event.clear()
 
     def stop(self):
+        """
+        Signal the worker to stop immediately without blocking the main thread.
+        
+        Non-blocking: We set the stop event and stop pygame immediately,
+        then schedule a cleanup check via QTimer to avoid freezing the UI.
+        """
         self._stop_event.set()
         self._pause_event.clear()
         try:
             pygame.mixer.music.stop()
         except Exception:
             pass
-        self.wait(1500)
+        
+        # Schedule non-blocking cleanup after 800ms
+        from PyQt6.QtCore import QTimer
+        def _cleanup():
+            if self.isRunning():
+                self.terminate()
+                self.wait(300)
+        QTimer.singleShot(800, _cleanup)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Backend 2 — pyttsx3 / SAPI5  (offline fallback, no pause support)
+# Backend 2 — pyttsx3 save-to-file + pygame  (offline, same pattern as Edge)
 # ═════════════════════════════════════════════════════════════════════════════
 
 class Pyttsx3Worker(QThread):
     """
-    Offline TTS via system SAPI5 / espeak. Pause is not supported.
+    Offline TTS using the same architecture as EdgeTTSWorker:
+
+      1. pyttsx3.save_to_file()  — render each sentence to a WAV file
+      2. pygame.mixer.music      — play the WAV file with full stop/pause/resume
+
+    This gives us the same smooth, instantly-stoppable playback as online mode.
+    Stop/pause/resume just control pygame — no engine teardown needed.
+
+    Pause IS supported because pygame.mixer.music.pause() works on WAV files.
     """
 
     preparing_speech  = pyqtSignal()
@@ -432,70 +453,200 @@ class Pyttsx3Worker(QThread):
     error_occurred    = pyqtSignal(str)
 
     def __init__(self, text: str, rate: int = 175, volume: float = 1.0,
-                 voice_id: str | None = None):
+                 voice_id: str | None = None,
+                 cached_wavs: list[str] | None = None,
+                 engine_ref=None,
+                 pyttsx3_lock=None):
         super().__init__()
-        self._text          = text
-        self._rate          = rate
-        self._volume        = volume
-        self._voice_id      = voice_id
-        self._engine: pyttsx3.Engine | None = None
-        self._stop_requested = False
+        self._text         = text
+        self._rate         = rate
+        self._volume       = volume
+        self._voice_id     = voice_id
+        self._cached_wavs  = cached_wavs
+        self._engine_ref   = engine_ref
+        self._pyttsx3_lock = pyttsx3_lock   # threading.Lock — serializes espeak access
+        self._stop_flag    = threading.Event()
+        self._pause_flag   = threading.Event()
+
+    # ── Worker thread body ────────────────────────────────────────────────────
 
     def run(self):
+        tmp_files: list[str] = []
+        owns_files = True   # True = we rendered them, we delete them on exit
         try:
-            self.preparing_speech.emit()
-            engine = pyttsx3.init()
-            self._engine = engine
-            engine.setProperty("rate",   self._rate)
-            engine.setProperty("volume", self._volume)
-            if self._voice_id:
-                engine.setProperty("voice", self._voice_id)
+            # ── Use cached WAVs if available (same text, instant replay) ──────
+            if self._cached_wavs:
+                tmp_files = list(self._cached_wavs)
+                owns_files = False   # cache owner manages these files
+                self.preparing_speech.emit()
+            else:
+                # ── Render phase: pyttsx3 → WAV files ────────────────────────
+                self.preparing_speech.emit()
+
+                # Acquire the lock — espeak is not thread-safe; concurrent
+                # pyttsx3.init() calls cause segfaults on Linux.
+                lock = self._pyttsx3_lock
+                if lock:
+                    lock.acquire()
+                try:
+                    engine = pyttsx3.init()
+                except Exception as exc:
+                    if lock:
+                        lock.release()
+                    self.error_occurred.emit(
+                        f"Failed to initialize TTS engine: {exc}\n"
+                        "On Linux, install espeak: sudo apt install espeak espeak-ng"
+                    )
+                    return
+
+                try:
+                    engine.setProperty("rate",   self._rate)
+                    engine.setProperty("volume", 1.0)
+                    if self._voice_id:
+                        engine.setProperty("voice", self._voice_id)
+                except Exception:
+                    pass
+
+                chunks = _split_sentences(self._text)
+                if len(chunks) > MAX_SENTENCE_QUEUE:
+                    self.error_occurred.emit(
+                        f"Text too long ({len(chunks)} sentences). "
+                        f"Reading the first {MAX_SENTENCE_QUEUE}."
+                    )
+                    chunks = chunks[:MAX_SENTENCE_QUEUE]
+
+                for sentence in chunks:
+                    sentence = sentence.strip()
+                    if not sentence:
+                        continue
+                    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                    tmp.close()
+                    try:
+                        engine.save_to_file(sentence, tmp.name)
+                        engine.runAndWait()
+                        tmp_files.append(tmp.name)
+                    except Exception as exc:
+                        self.error_occurred.emit(f"TTS render error: {exc}")
+                        try:
+                            os.remove(tmp.name)
+                        except Exception:
+                            pass
+
+                try:
+                    engine.stop()
+                    del engine
+                except Exception:
+                    pass
+                finally:
+                    if lock:
+                        lock.release()
+
+                # Store in cache so restart can replay instantly
+                if tmp_files and self._engine_ref is not None:
+                    try:
+                        self._engine_ref.store_wav_cache(self._text, tmp_files)
+                        owns_files = False   # cache now owns the files
+                    except Exception:
+                        # store failed — we still own the files, delete them below
+                        owns_files = True
+
+            if not tmp_files or self._stop_flag.is_set():
+                return
+
+            # ── Playback phase: pygame plays each WAV ─────────────────────────
             self.started_speaking.emit()
 
-            chunks = _split_sentences(self._text)
-
-            if len(chunks) > MAX_SENTENCE_QUEUE:
-                self.error_occurred.emit(
-                    f"Warning: Text too long ({len(chunks)} sentences). "
-                    f"Reading the first {MAX_SENTENCE_QUEUE} sentences only."
-                )
-                chunks = chunks[:MAX_SENTENCE_QUEUE]
-
-            for chunk in chunks:
-                if self._stop_requested:
+            for wav_path in tmp_files:
+                if self._stop_flag.is_set():
                     break
-                engine.say(chunk)
-                engine.runAndWait()
+
+                if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 64:
+                    continue
+
+                try:
+                    pygame.mixer.music.load(wav_path)
+                    pygame.mixer.music.set_volume(self._volume)
+                    pygame.mixer.music.play()
+                except Exception as exc:
+                    self.error_occurred.emit(f"Audio playback error: {exc}")
+                    continue
+
+                while pygame.mixer.music.get_busy():
+                    if self._stop_flag.is_set():
+                        pygame.mixer.music.stop()
+                        break
+
+                    if self._pause_flag.is_set():
+                        pygame.mixer.music.pause()
+                        self.paused_speaking.emit()
+                        while self._pause_flag.is_set():
+                            if self._stop_flag.is_set():
+                                pygame.mixer.music.stop()
+                                break
+                            self.msleep(40)
+                        else:
+                            pygame.mixer.music.unpause()
+                            self.resumed_speaking.emit()
+                        if self._stop_flag.is_set():
+                            break
+
+                    self.msleep(40)
+
+                try:
+                    pygame.mixer.music.unload()
+                except Exception:
+                    pass
+
+                if self._stop_flag.is_set():
+                    break
 
         except Exception as exc:
-            self.error_occurred.emit(str(exc))
+            if not self._stop_flag.is_set():
+                self.error_occurred.emit(f"Unexpected TTS error: {exc}")
         finally:
             try:
-                if self._engine:
-                    self._engine.stop()
+                pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
             except Exception:
                 pass
-            self._engine = None
-            if not self.isInterruptionRequested():
-                self.finished_speaking.emit()
+            # Only delete files we own (not cached files managed by TTSEngine)
+            if owns_files:
+                for f in tmp_files:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except Exception:
+                        pass
+            self.finished_speaking.emit()
+
+    # ── Pause / resume — NOW SUPPORTED via pygame ─────────────────────────────
 
     def pause(self):
-        pass
+        self._pause_flag.set()
 
     def resume(self):
-        pass
+        self._pause_flag.clear()
+
+    # ── Stop ──────────────────────────────────────────────────────────────────
 
     def stop(self):
-        self._stop_requested = True
+        """
+        Instantly stop playback. Non-blocking — pygame.mixer.music.stop()
+        returns immediately. The run() loop detects the flag within 40 ms.
+        """
+        self._stop_flag.set()
+        self._pause_flag.clear()
         try:
-            if self._engine:
-                self._engine.stop()
+            pygame.mixer.music.stop()
         except Exception:
             pass
-        self.requestInterruption()
-        if not self.wait(1500):
-            self.terminate()
-            self.wait(500)
+        # Schedule cleanup — non-blocking so UI stays responsive
+        from PyQt6.QtCore import QTimer
+        def _cleanup():
+            if self.isRunning():
+                self.terminate()
+                self.wait(200)
+        QTimer.singleShot(600, _cleanup)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -506,17 +657,33 @@ class TTSEngine:
     """
     Manages one active worker at a time.
     Prefers EdgeTTS (neural, human-like). Falls back to pyttsx3.
+
+    Audio cache
+    -----------
+    For offline mode (Pyttsx3Worker), rendered WAV files are cached by a
+    hash of (text + voice_id + rate).  On restart with the same text the
+    cached files are replayed instantly — no re-render needed.
+    Cache holds at most 1 entry (the most recent text) to keep disk use low.
     """
 
     def __init__(self):
         self._worker: EdgeTTSWorker | Pyttsx3Worker | None = None
+        self._stopping: bool = False   # True while a worker is being torn down
+
+        # Offline audio cache — {cache_key: [wav_path, ...]}
+        self._wav_cache: dict[str, list[str]] = {}
+        self._wav_cache_key: str = ""
+
+        # Global lock — prevents concurrent pyttsx3.init() calls which
+        # cause segfaults on Linux (espeak is not thread-safe).
+        self._pyttsx3_lock = threading.Lock()
 
         # Edge-TTS settings
         self._edge_voice    = "en-US-AriaNeural"
         self._edge_rate     = "+0%"
         self._volume        = 1.0
         self._force_offline = False
-        self._active_lang   = "en"   # currently selected language ISO code
+        self._active_lang   = "en"
 
         # pyttsx3 fallback settings
         self._rate        = 175
@@ -546,7 +713,7 @@ class TTSEngine:
         self._force_offline = offline
 
     def supports_pause(self) -> bool:
-        return self._use_edge()
+        return True   # both EdgeTTSWorker and Pyttsx3Worker now use pygame
 
     # ── Language selection ────────────────────────────────────────────────────
 
@@ -566,13 +733,38 @@ class TTSEngine:
     # ── Voice discovery ───────────────────────────────────────────────────────
 
     def _load_pyttsx3_voices(self):
-        try:
-            engine = pyttsx3.init()
-            raw = engine.getProperty("voices")
-            self._pyttsx3_voices = [{"id": v.id, "name": v.name} for v in raw]
-            engine.stop()
-        except Exception:
-            self._pyttsx3_voices = []
+        """Load system TTS voices in a daemon thread so startup never blocks."""
+        def _load():
+            with self._pyttsx3_lock:   # serialize — espeak is not thread-safe
+                try:
+                    engine = pyttsx3.init()
+                    raw = engine.getProperty("voices") or []
+                    self._pyttsx3_voices = [{"id": v.id, "name": v.name} for v in raw]
+
+                    if self._pyttsx3_voices and not self._voice_id:
+                        for v in self._pyttsx3_voices:
+                            vid = v["id"].lower()
+                            vname = v["name"].lower()
+                            if "en-us" in vid or "en_us" in vid or "english (us)" in vname:
+                                self._voice_id = v["id"]
+                                break
+                        if not self._voice_id:
+                            for v in self._pyttsx3_voices:
+                                vid = v["id"].lower()
+                                vname = v["name"].lower()
+                                if "en" in vid or "english" in vname:
+                                    self._voice_id = v["id"]
+                                    break
+                        if not self._voice_id and self._pyttsx3_voices:
+                            self._voice_id = self._pyttsx3_voices[0]["id"]
+
+                    engine.stop()
+                    del engine
+                except Exception:
+                    self._pyttsx3_voices = []
+
+        t = threading.Thread(target=_load, daemon=True, name="pyttsx3-voice-loader")
+        t.start()
 
     def get_voices(self) -> list[dict]:
         """Return voices for the currently selected language (Edge) or all system voices (offline)."""
@@ -582,12 +774,65 @@ class TTSEngine:
 
     # ── Playback ──────────────────────────────────────────────────────────────
 
+    def _wav_key(self, text: str) -> str:
+        """Cache key: hash of text + voice + rate so any change invalidates it."""
+        import hashlib
+        raw = f"{text}|{self._voice_id}|{self._rate}"
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def _clear_wav_cache(self):
+        """Delete cached WAV files from disk and clear the in-memory index."""
+        for path in self._wav_cache.get(self._wav_cache_key, []):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
+        self._wav_cache.clear()
+        self._wav_cache_key = ""
+
+    def __del__(self):
+        """Clean up cached WAV files when the engine is garbage collected."""
+        try:
+            self._clear_wav_cache()
+        except Exception:
+            pass
+
+    def get_cached_wavs(self, text: str) -> list[str] | None:
+        """
+        Return cached WAV file list if text matches the last render,
+        and all files still exist on disk.  Returns None on any mismatch.
+        """
+        key = self._wav_key(text)
+        if key != self._wav_cache_key:
+            return None
+        files = self._wav_cache.get(key, [])
+        if not files:
+            return None
+        # Verify files still exist (could have been cleaned up externally)
+        if all(os.path.exists(f) and os.path.getsize(f) > 64 for f in files):
+            return files
+        return None
+
+    def store_wav_cache(self, text: str, wav_files: list[str]):
+        """Called by Pyttsx3Worker after rendering to cache the WAV paths."""
+        # Evict old cache first
+        self._clear_wav_cache()
+        key = self._wav_key(text)
+        self._wav_cache[key] = list(wav_files)
+        self._wav_cache_key = key
+
     def speak(self, text: str,
               on_preparing=None, on_start=None,
               on_finish=None, on_error=None,
               on_paused=None, on_resumed=None,
               on_word_highlight=None,
               session_path: str | None = None):
+        # Guard: if we're already in the middle of a stop(), don't start a new
+        # worker until the previous one is fully torn down.
+        if self._stopping:
+            return None
+
         self.stop()
 
         if self._use_edge():
@@ -599,7 +844,17 @@ class TTSEngine:
                 session_path=session_path,
             )
         else:
-            worker = Pyttsx3Worker(text, self._rate, self._volume, self._voice_id)
+            # Check if we have cached WAV files for this exact text
+            cached = self.get_cached_wavs(text)
+            worker = Pyttsx3Worker(
+                text,
+                rate=self._rate,
+                volume=self._volume,
+                voice_id=self._voice_id,
+                cached_wavs=cached,
+                engine_ref=self,
+                pyttsx3_lock=self._pyttsx3_lock,   # prevent concurrent espeak access
+            )
 
         if on_preparing:      worker.preparing_speech.connect(on_preparing)
         if on_start:          worker.started_speaking.connect(on_start)
@@ -615,9 +870,31 @@ class TTSEngine:
         return worker
 
     def stop(self):
-        if self._worker and self._worker.isRunning():
-            self._worker.stop()
-        self._worker = None
+        w = self._worker
+        self._worker = None   # clear first so we know this worker is orphaned
+        if w and w.isRunning():
+            self._stopping = True
+            # Disconnect all signals before stopping so queued finished_speaking
+            # from the dying worker doesn't fire into the app after stop().
+            try:
+                w.finished_speaking.disconnect()
+                w.error_occurred.disconnect()
+                w.started_speaking.disconnect()
+                w.preparing_speech.disconnect()
+                w.paused_speaking.disconnect()
+                w.resumed_speaking.disconnect()
+            except Exception:
+                pass
+            w.stop()
+            # Clear the stopping flag after a short delay — enough time for
+            # the worker's QTimer cleanup to fire without blocking the UI.
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(200, self._clear_stopping)
+        else:
+            self._stopping = False
+
+    def _clear_stopping(self):
+        self._stopping = False
 
     def pause(self):
         if self._worker and self._worker.isRunning():
@@ -628,11 +905,14 @@ class TTSEngine:
             self._worker.resume()
 
     def is_speaking(self) -> bool:
-        return bool(self._worker and self._worker.isRunning())
+        """True only when actively playing audio — False when paused or idle."""
+        return bool(self._worker and self._worker.isRunning()) and not self.is_paused()
 
     def is_paused(self) -> bool:
         if isinstance(self._worker, EdgeTTSWorker):
             return self._worker._pause_event.is_set()
+        if isinstance(self._worker, Pyttsx3Worker):
+            return self._worker._pause_flag.is_set()
         return False
 
     # ── Settings ──────────────────────────────────────────────────────────────

@@ -76,6 +76,12 @@ class ThemeMixin:
         # Translate tab swap icon (theme-sensitive SVG)
         if hasattr(self, "refresh_translate_icons"):
             self.refresh_translate_icons()
+        # Generate tab attach icons (theme-sensitive SVG)
+        if hasattr(self, "refresh_generate_icons"):
+            self.refresh_generate_icons()
+        # Dev-lock "I want to see" buttons
+        for btn, style_fn in getattr(self, "_dev_lock_peek_btns", []):
+            btn.setStyleSheet(style_fn(self._dark))
 
     def _apply_sidebar_theme(self):
         if self._sidebar_widget is None:

@@ -158,12 +158,14 @@ class DraggableTabBar(QWidget):
                 item.widget().setParent(None)
         self._buttons.clear()
 
-        _GATED = {2, 3, 4, 5}
+        _GATED = {2, 3, 4, 5, 6, 7, 8}   # all feature tabs show lock icon (dev + API gate)
+        _DEV_LOCKED = {2, 3, 4, 5, 6, 7, 8}  # always show lock — under development
         has_key = getattr(self._mixin, "_has_any_api_key", lambda: True)()
 
         for pos, canonical in enumerate(self._order):
             base_label = TAB_DEFS[canonical][0] if canonical < len(TAB_DEFS) else str(canonical)
-            locked = canonical in _GATED and not has_key
+            # Show lock if: dev-locked tab (always) OR API-gated tab without a key
+            locked = canonical in _DEV_LOCKED or (canonical in _GATED and not has_key)
 
             btn = QPushButton(base_label)
             btn.setObjectName("tabBtn")
@@ -178,7 +180,10 @@ class DraggableTabBar(QWidget):
                 btn.setIcon(self._lock_icon())
                 from PyQt6.QtCore import QSize
                 btn.setIconSize(QSize(13, 13))
-                btn.setToolTip("Add an API key in My API Key to unlock this feature")
+                if canonical in _DEV_LOCKED:
+                    btn.setToolTip("This feature is under development")
+                else:
+                    btn.setToolTip("Add an API key in My API Key to unlock this feature")
 
             btn.mousePressEvent   = lambda ev, i=pos: self._btn_press(ev, i)
             btn.mouseMoveEvent    = lambda ev, i=pos: self._btn_move(ev, i)

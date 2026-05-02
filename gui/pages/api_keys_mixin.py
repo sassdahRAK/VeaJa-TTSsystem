@@ -1841,7 +1841,29 @@ class ApiKeysMixin:
 
     def _save_api_keys(self):
         data = {k: field.text().strip() for k, field in self._api_key_inputs.items()}
-        # Debug: print which keys have values
+
+        # If a custom card's name maps to a known provider, also write the
+        # value into the standard slot so get_api_keys() picks it up directly.
+        _CUSTOM_NAME_MAP = {
+            "gemini":    "api_key_gemini",
+            "google":    "api_key_gemini",
+            "aistudio":  "api_key_gemini",
+            "openai":    "api_key_openai",
+            "gpt":       "api_key_openai",
+            "claude":    "api_key_claude",
+            "anthropic": "api_key_claude",
+        }
+        for k, v in list(data.items()):
+            if not k.startswith("custom_") or not v:
+                continue
+            k_lower = k.lower()
+            for keyword, std_key in _CUSTOM_NAME_MAP.items():
+                if keyword in k_lower:
+                    # Only fill the standard slot if it isn't already set
+                    if not data.get(std_key):
+                        data[std_key] = v
+                    break
+
         import sys
         set_keys = [k for k, v in data.items() if v]
         print(f"[SAVE] Saving {len(set_keys)} keys: {set_keys}", file=sys.stderr)
