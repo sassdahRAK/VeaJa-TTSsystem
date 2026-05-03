@@ -39,9 +39,10 @@ QApplication.setHighDpiScaleFactorRoundingPolicy(
 )
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 
+# NOTE: SplashScreen is the ONLY import here at module level.
+# AppController, TTSEngine, pygame, edge_tts, pynput etc. are all
+# imported AFTER the splash is visible — see main() below.
 from gui.splash_screen import SplashScreen
-from services.app_controller import AppController
-from services.window_manager import WindowManager
 
 
 # ── Single-instance lock ─────────────────────────────────────────────────────
@@ -157,7 +158,34 @@ def main() -> None:
         app = QApplication(sys.argv)
         _configure_app(app)
 
-    # ── Check for espeak on Linux (required for offline mode) ────────────
+    # ── 1. Splash screen — show immediately before any heavy imports ─────
+    # Read saved theme first (lightweight — just opens a JSON file)
+    _saved_dark: bool | None = None
+    try:
+        import json
+        from pathlib import Path
+        _profile_path = Path.home() / ".veaja" / "profile.json"
+        with open(_profile_path, encoding="utf-8") as _f:
+            _saved_dark = json.load(_f).get("dark_mode")
+        if not isinstance(_saved_dark, bool):
+            _saved_dark = None
+    except Exception:
+        pass
+
+    splash = SplashScreen(saved_dark=_saved_dark)
+    splash.show()
+    # Force the splash to paint NOW before we do any heavy imports
+    app.processEvents()
+    app.processEvents()   # second call ensures the window is fully rendered
+
+    # ── 2. Heavy imports — happen while splash is visible ────────────────
+    # These are deferred until after the splash shows so the user sees
+    # the splash immediately instead of staring at a blank screen.
+    # edge_tts: ~390ms, PyQt6 pages: ~200ms, pynput: ~80ms, pygame: ~76ms
+    from services.app_controller import AppController
+    from services.window_manager  import WindowManager   # noqa: F401
+
+    # ── 3. Check for espeak on Linux ─────────────────────────────────────
     if platform.system() == "Linux":
         import shutil
         if not shutil.which("espeak") and not shutil.which("espeak-ng"):
@@ -175,38 +203,13 @@ def main() -> None:
             msg.setStandardButtons(QMessageBox.StandardButton.Ok)
             msg.exec()
 
-    # ── 1. Splash screen — read saved theme before building anything ─────
-    _saved_dark: bool | None = None
-    try:
-        import json
-        from core.profile import PROFILE_PATH
-        with open(PROFILE_PATH, encoding="utf-8") as _f:
-            _saved_dark = json.load(_f).get("dark_mode")
-        if not isinstance(_saved_dark, bool):
-            _saved_dark = None
-    except Exception:
-        pass
-
-    splash = SplashScreen(saved_dark=_saved_dark)
-    splash.show()
-    app.processEvents()          # paint splash immediately before heavy init
-
-    # ── 2. Build all app components ──────────────────────────────────────
-    #    AppController creates: TTSEngine, MainWindow, OverlayWidget,
-    #                           TrayIcon, SelectionMonitor, WindowManager
+    # ── 4. Build all app components ──────────────────────────────────────
     controller = AppController(app)
+    wm: WindowManager = controller.window_manager   # noqa: F841
 
-    # ── 3. WindowManager — explicit reference so the rule is readable here
-    #
-    #    overlay shown  →  main window hides   (live in tray)
-    #    overlay hidden →  main window returns
-    #    tray click     →  always show main
-    #
-    wm: WindowManager = controller.window_manager
-
-    # ── 4. Wire splash finish → start app (loads profile, shows terms if new) ──
+    # ── 5. Wire splash finish → start app ────────────────────────────────
     splash.finished.connect(controller.start)
-    splash.start_timer(delay_ms=2500)
+    splash.start_timer(delay_ms=1800)   # shorter hold — imports already done
 
     sys.exit(app.exec())
 
