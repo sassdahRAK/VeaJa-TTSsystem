@@ -28,22 +28,12 @@ os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
 os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
 
 # ── Linux: force XCB (X11/XWayland) backend ─────────────────────────────────
-# The native Wayland Qt plugin does NOT support:
-#   • WA_TranslucentBackground (overlay transparency)
-#   • WindowStaysOnTopHint     (overlay always-on-top)
-#   • window.move()            (overlay/main window positioning)
-#   • raise_() / activateWindow() (bringing overlay to front on Ctrl+C)
-#
-# XWayland provides full X11 compatibility on Wayland desktops, so we force
-# Qt to use the xcb plugin on Linux unless the user has explicitly overridden
-# QT_QPA_PLATFORM themselves.
 if platform.system() == "Linux":
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 
-# Enable HiDPI pixmaps and automatic scaling on all platforms
 QApplication.setHighDpiScaleFactorRoundingPolicy(
     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
 )
@@ -54,6 +44,75 @@ from services.app_controller import AppController
 from services.window_manager import WindowManager
 
 
+# ── Single-instance lock ─────────────────────────────────────────────────────
+
+def _acquire_instance_lock():
+    """
+    Prevent multiple Veaja instances from running simultaneously.
+
+    Uses a lock file at ~/.veaja/veaja.lock containing the current PID.
+    On startup:
+      1. If no lock file exists → write our PID and continue.
+      2. If a lock file exists → check if that PID is still alive.
+         • Alive  → another instance is running → exit immediately.
+         • Dead   → stale lock from a crash → overwrite and continue.
+
+    Returns the lock file path so the caller can clean it up on exit.
+    """
+    import fcntl
+    from pathlib import Path
+
+    lock_dir  = Path.home() / ".veaja"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / "veaja.lock"
+
+    system = platform.system()
+
+    if system == "Windows":
+        # Windows: use a named mutex — most reliable on Windows
+        try:
+            import ctypes
+            mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "VeajaAppMutex")
+            last_err = ctypes.windll.kernel32.GetLastError()
+            if last_err == 183:  # ERROR_ALREADY_EXISTS
+                # Another instance is running — bring it to front via tray
+                from PyQt6.QtWidgets import QMessageBox
+                msg = QMessageBox()
+                msg.setWindowTitle("Veaja")
+                msg.setText("Veaja is already running.\nCheck the system tray.")
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.exec()
+                sys.exit(0)
+        except Exception:
+            pass
+        return None
+
+    else:
+        # Linux / macOS: use fcntl file lock (released automatically on process exit)
+        try:
+            lock_file = open(lock_path, "w")
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_file.write(str(os.getpid()))
+            lock_file.flush()
+            # Keep the file open — lock is held as long as the process lives
+            # Store reference so it isn't garbage collected
+            _acquire_instance_lock._lock_file = lock_file
+            return lock_path
+        except BlockingIOError:
+            # Lock is held by another process — already running
+            from PyQt6.QtWidgets import QApplication as _QApp, QMessageBox
+            _tmp_app = _QApp.instance() or _QApp(sys.argv)
+            msg = QMessageBox()
+            msg.setWindowTitle("Veaja")
+            msg.setText("Veaja is already running.\nCheck the system tray.")
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.exec()
+            sys.exit(0)
+        except Exception:
+            # Can't acquire lock for any other reason — allow startup anyway
+            return None
+
+
 # ── App-level configuration ──────────────────────────────────────────────────
 
 def _configure_app(app: QApplication) -> None:
@@ -62,20 +121,16 @@ def _configure_app(app: QApplication) -> None:
     app.setOrganizationName("Veaja")
     app.setOrganizationDomain("veaja.app")
 
-    # Set app-level icon so Windows shows "Veaja" (not "Python") in
-    # taskbar tooltips, notifications, and the Alt+Tab switcher
     _assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
     for _name in ("logo_dark.png", "logo_light.png"):
         _p = os.path.join(_assets, _name)
         if os.path.exists(_p):
             app.setWindowIcon(QIcon(QPixmap(_p)))
             break
-    
 
     system = platform.system()
     if system == "Darwin":
         app.setFont(QFont("SF Pro Text", 13))
-        # Keep running in tray even when all windows are closed
         app.setQuitOnLastWindowClosed(False)
     elif system == "Windows":
         app.setFont(QFont("Segoe UI", 10))
@@ -90,8 +145,17 @@ def main() -> None:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
-    app = QApplication(sys.argv)
-    _configure_app(app)
+    # ── Single-instance guard — must run before QApplication on Linux/macOS ──
+    # On Windows, QApplication must exist first for the messagebox to work,
+    # so we create it early and then check.
+    if platform.system() == "Windows":
+        app = QApplication(sys.argv)
+        _configure_app(app)
+        _acquire_instance_lock()   # exits here if already running
+    else:
+        _acquire_instance_lock()   # exits here if already running
+        app = QApplication(sys.argv)
+        _configure_app(app)
 
     # ── Check for espeak on Linux (required for offline mode) ────────────
     if platform.system() == "Linux":
