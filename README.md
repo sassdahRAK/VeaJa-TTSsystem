@@ -2,7 +2,7 @@
 
 # Veaja
 
-**Cross-platform text-to-speech desktop app — copy text anywhere, hear it spoken.**
+**Select text anywhere. Press Ctrl+C. Hear it spoken.**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
 [![PyQt6](https://img.shields.io/badge/UI-PyQt6-green)](https://pypi.org/project/PyQt6/)
@@ -15,19 +15,35 @@
 
 ## What is Veaja?
 
-Veaja is a lightweight desktop app that turns selected text into speech. Select text in any app, press **Ctrl+C**, and a floating pill appears near your cursor. Click it — and it reads aloud using high-quality neural voices.
+Veaja is a desktop text-to-speech app that lives in your system tray. Select any text in any app, press **Ctrl+C**, and a floating pill appears near your cursor. Click it to hear the text read aloud.
 
-**Key features:**
+It works in two modes:
+
+- **Online mode** — Microsoft neural voices via `edge-tts`. High quality, natural-sounding. Requires internet.
+- **Offline mode** — System voices via `pyttsx3` + `espeak`. Fully local, no internet needed. On Linux, requires `espeak` to be installed.
+
+Both modes support **pause, resume, and stop** — controlled by clicking the overlay pill.
+
+---
+
+## Features
 
 - Floating pill overlay with real-time word-by-word karaoke highlighting
-- Online mode — Microsoft neural voices via `edge-tts` (pause/resume supported)
-- Offline mode — system TTS fallback via `pyttsx3` (always available)
-- Auto language detection — filters non-English text to protect neural voices
-- Audio session history — last 3 readings saved as MP3 in `~/.veaja/audio/`
+- Online mode — Microsoft neural voices (US, UK, AU, and many other languages)
+- Offline mode — system TTS via espeak (Linux), SAPI5 (Windows), AVSpeech (macOS)
+- Pause / resume support in both online and offline modes
+- Smart restart button — detects new clipboard text vs replaying same audio
+- WAV audio cache — offline mode replays same text instantly without re-rendering
+- Auto network detection — switches online/offline automatically when WiFi changes
+- Collapsible sidebar with hamburger toggle
 - Dark / light theme — follows system or user override
 - Global hotkeys — `Ctrl+C` to copy, `Ctrl+R` to read clipboard immediately
 - System tray — runs in background, out of your way
+- Audio session history — last 3 readings saved as MP3 in `~/.veaja/audio/`
+- Multi-language support — English, French, Khmer, Chinese, Japanese, Korean, and more
+- AI features — Summary, Translate, Code, Grammar, Ask (requires API keys)
 - User profile — custom avatar, highlight color, voice, speed, volume
+- Non-modal Privacy notice — overlay stays interactive while notice is open
 
 ---
 
@@ -36,96 +52,68 @@ Veaja is a lightweight desktop app that turns selected text into speech. Select 
 | Requirement | Version |
 |---|---|
 | Python | 3.10 or later |
-| Operating System | Windows 10/11 · macOS 12+ · Linux (x64/ARM) |
-| Internet | Optional — required only for online neural voices |
+| OS | Windows 10/11 · macOS 12+ · Linux (Ubuntu 20.04+) |
+| Internet | Optional (online mode only) |
+
+**Linux only:** Install `espeak` for offline mode:
+```bash
+sudo apt install espeak espeak-ng
+```
 
 ---
 
 ## Quick Start
 
-### 1. Clone the repository
-
 ```bash
+# 1. Clone
 git clone https://github.com/sassdahRAK/VeaJa-TTSsystem.git
 cd VeaJa-TTSsystem
-```
 
-### 2. Create a virtual environment
-
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
-
-# macOS / Linux
+# 2. Create virtual environment
 python3 -m venv venv
-source venv/bin/activate
-```
+source venv/bin/activate   # Windows: venv\Scripts\activate
 
-### 3. Install dependencies
-
-```bash
+# 3. Install dependencies
 pip install -r requirements.txt
-```
 
-**Linux users:** For offline mode, install espeak:
-```bash
-sudo apt install espeak espeak-ng  # Ubuntu/Debian
-sudo dnf install espeak espeak-ng  # Fedora
-sudo pacman -S espeak-ng           # Arch
-```
-
-### 4. Run the app
-
-```bash
+# 4. Run
 python main.py
 ```
+
+See [INSTALL.md](INSTALL.md) for detailed platform-specific instructions.
 
 ---
 
-## Command Line Reference
+## How to use
 
-Veaja is launched from the terminal. The following options are supported:
+1. **Select text** in any app (browser, PDF, document, etc.)
+2. Press **Ctrl+C** — the floating pill appears near your cursor
+3. **Click the pill** to start reading
+4. Click again to **pause**, click again to **resume**
+5. Click the **⟳ restart button** to restart from the beginning
+   - If you've copied new text, it reads the new text instead
+6. Right-click the pill for more options (Hide, Settings, Quit)
 
-```
-Usage: python main.py [OPTIONS]
+Or press **Ctrl+R** to read the clipboard immediately without the pill appearing first.
 
-Options:
-  (no flags)           Launch the full desktop app (default)
-  --help               Show this help message
-  --version            Print app version and exit
-  --offline            Force offline TTS mode at startup
-  --voice <name>       Set the voice at startup (see voice list below)
-  --rate <wpm>         Set speech rate in words per minute (default: 175)
-  --volume <0.0-1.0>   Set volume level (default: 1.0)
-  --dark               Force dark theme
-  --light              Force light theme
-  --no-splash          Skip the splash screen (faster startup)
-  --reset-profile      Reset user profile to defaults and launch
-```
+---
 
-### Examples
+## Global hotkeys
 
-```bash
-# Launch normally
-python main.py
+| Hotkey | Action |
+|---|---|
+| `Ctrl+C` | Copy selected text and show the pill overlay |
+| `Ctrl+R` | Read clipboard content immediately |
+| Click pill | Start / pause / resume |
+| Click pill (paused) | Resume |
+| Click ⟳ | Restart (or read new clipboard text) |
+| Right-click pill | Context menu |
 
-# Launch in offline mode (no internet needed)
-python main.py --offline
+---
 
-# Launch with a specific voice and faster speech
-python main.py --voice en-US-GuyNeural --rate 220
+## Available voices (online mode — English)
 
-# Launch in dark mode, skipping the splash screen
-python main.py --dark --no-splash
-
-# Reset your profile settings back to defaults
-python main.py --reset-profile
-```
-
-### Available voices (online mode)
-
-| Voice name | Accent | Gender |
+| Voice | Accent | Gender |
 |---|---|---|
 | `en-US-AriaNeural` | US English | Female (default) |
 | `en-US-JennyNeural` | US English | Female |
@@ -136,170 +124,88 @@ python main.py --reset-profile
 | `en-AU-NatashaNeural` | Australian English | Female |
 | `en-AU-WilliamNeural` | Australian English | Male |
 
-> Offline mode uses your system's default voice (SAPI5 on Windows, AVSpeechSynth on macOS, espeak-ng on Linux).
+Other languages (French, Khmer, Chinese, Japanese, Korean, Thai, Hindi, Arabic, German, Spanish, Portuguese, Russian, Vietnamese, Indonesian) are also available in online mode.
+
+> Offline mode uses your system's default voice: SAPI5 on Windows, AVSpeechSynthesizer on macOS, espeak-ng on Linux. Veaja auto-selects English (US) if available.
 
 ---
 
-## Global Hotkeys
+## Command line options
 
-| Hotkey | Action |
-|---|---|
-| `Ctrl+C` | Copy selected text and show the pill overlay |
-| `Ctrl+R` | Read clipboard content immediately |
-| Click pill | Start reading (or pause if already speaking) |
-| Click pill (paused) | Resume |
-| Right-click pill | Context menu (Hide · Settings · Reset) |
-
----
-
-## Folder Structure
-
-```
-veaja/
-├── main.py                   Entry point
-├── requirements.txt          Python dependencies
-│
-├── config/
-│   └── settings.py           App-wide constants and feature flags
-│
-├── core/                     Platform-independent business logic
-│   ├── tts_engine.py         TTS orchestrator (EdgeTTS + pyttsx3)
-│   ├── selection_monitor.py  Clipboard watcher + global hotkeys
-│   ├── audio_history.py      MP3 session FIFO queue
-│   ├── profile.py            User profile (JSON, ~/.veaja/profile.json)
-│   ├── network_monitor.py    Background connectivity checker
-│   └── language/
-│       ├── __init__.py       Public API: filter_for_tts, detect_language
-│       └── detector.py       Unicode-range language detection
-│
-├── gui/                      PyQt6 desktop UI
-│   ├── main_window.py        Dashboard (tabs: Read · History · Settings · Profile)
-│   ├── overlay_widget.py     Floating pill overlay
-│   ├── tray_icon.py          System tray icon + notifications
-│   ├── splash_screen.py      Startup splash
-│   ├── profile_dialog.py     Profile editor modal
-│   ├── terms_dialog.py       Terms & privacy dialog
-│   ├── tour_overlay.py       Interactive onboarding tour
-│   ├── photo_crop_dialog.py  Avatar crop tool
-│   ├── theme_mixin.py        Dark / light theme utilities
-│   └── pages/                Dashboard page mixins
-│       ├── dashboard_mixin.py
-│       ├── history_mixin.py
-│       ├── settings_mixin.py
-│       ├── profile_mixin.py
-│       └── info_pages_mixin.py
-│
-├── services/
-│   ├── app_controller.py     Central mediator — wires all components
-│   └── window_manager.py     Overlay ↔ main window visibility rules
-│
-├── platform_adapters/        OS-specific adapters
-│   ├── base.py               Abstract interface
-│   ├── windows.py            Windows x64 / ARM64
-│   ├── macos.py              macOS Intel / Apple Silicon
-│   ├── linux.py              Linux x64 / ARM
-│   ├── android.py            Android stub (future)
-│   └── ios.py                iOS stub (future)
-│
-├── styles/
-│   ├── dark.qss              Dark theme stylesheet
-│   └── light.qss             Light theme stylesheet
-│
-├── i18n/
-│   ├── __init__.py           t(key, lang) translation helper
-│   └── en/strings.json       English UI strings
-│
-└── assets/
-    ├── logo_dark.png
-    └── logo_light.png
+```bash
+python main.py                    # Launch normally
+python main.py --offline          # Start in offline mode
+python main.py --dark             # Force dark theme
+python main.py --no-splash        # Skip splash screen
+python main.py --reset-profile    # Reset all settings to defaults
+python main.py --voice en-US-GuyNeural --rate 200
 ```
 
 ---
 
-## User Data
+## User data
 
-All user data is stored in `~/.veaja/`:
+All user data is stored locally at `~/.veaja/`:
 
 | Path | Contents |
 |---|---|
-| `~/.veaja/profile.json` | Your saved settings (voice, theme, speed, avatar, etc.) |
+| `~/.veaja/profile.json` | Settings (voice, theme, speed, avatar, etc.) |
 | `~/.veaja/audio/` | Last 3 reading sessions as MP3 files |
 
-To reset everything, delete the `~/.veaja/` folder or run:
-
+To reset everything:
 ```bash
 python main.py --reset-profile
+# or delete the folder:
+rm -rf ~/.veaja
 ```
 
 ---
 
-## macOS — Accessibility Permission
-
-Veaja uses global hotkeys which require Accessibility access on macOS.
-
-On first run you will be prompted. If not, grant it manually:
-
-```
-System Settings → Privacy & Security → Accessibility → add Terminal (or Python)
-```
-
----
-
-## Platform Notes
-
-### Windows
-- TTS voices: SAPI5 (offline), edge-tts (online)
-- High-DPI scaling is enabled automatically
-- Runs from PowerShell, CMD, or Windows Terminal
-
-### macOS
-- TTS voices: AVSpeechSynthesizer (offline), edge-tts (online)
-- Pill overlay uses `NSPopUpMenuWindowLevel` to float above all apps
-- Requires Accessibility permission for global hotkeys
+## Platform notes
 
 ### Linux
-- TTS voices: espeak-ng (offline), edge-tts (online)
-- Install espeak-ng if not already present: `sudo apt install espeak-ng`
-- Tested on Ubuntu 22.04+ and Debian 12
+- Requires `espeak` or `espeak-ng` for offline mode
+- Uses XCB (X11/XWayland) backend — native Wayland is not supported
+- Tested on Ubuntu 22.04+
+
+### macOS
+- Requires Accessibility permission for global hotkeys
+- Pill overlay uses `NSPopUpMenuWindowLevel` to float above all apps
+- Tested on macOS 13+
+
+### Windows
+- No additional setup required
+- SAPI5 voices work out of the box
+- Tested on Windows 10 and 11
 
 ---
 
-## Development
+## Project structure
 
-### Running tests
-
-```bash
-# (Add your test runner command here as tests are added)
-pytest tests/
+```
+veaja/
+├── main.py                  Entry point
+├── requirements.txt         Python dependencies
+├── config/settings.py       App constants
+├── core/                    Business logic (no UI imports)
+│   ├── tts_engine.py        TTS orchestrator (EdgeTTS + pyttsx3)
+│   ├── selection_monitor.py Clipboard + hotkey listener
+│   ├── audio_history.py     MP3 session history
+│   ├── profile.py           User profile (JSON)
+│   ├── network_monitor.py   Internet connectivity checker
+│   └── language/            Language detection + filtering
+├── gui/                     PyQt6 UI
+│   ├── main_window.py       Main window with collapsible sidebar
+│   ├── overlay_widget.py    Floating pill overlay
+│   └── pages/               Dashboard page mixins
+├── services/
+│   ├── app_controller.py    Central mediator
+│   └── window_manager.py    Overlay ↔ window visibility
+├── styles/                  Dark/light QSS stylesheets
+└── assets/                  Icons and images
 ```
 
-### Linting
-
-```bash
-pip install ruff
-ruff check .
-```
-
-### Code style
-
-- Python 3.10+ type hints where practical
-- Docstrings on every class and public method
-- `core/` must have zero GUI imports (enforced by convention)
-- Signal/slot names follow Qt conventions: `snake_case` signals, `on_<signal>` slots
-
----
-
-## Contributing
-
-Contributions are welcome. Please open an issue first to discuss what you'd like to change.
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit your changes: `git commit -m "add: your feature"`
-4. Push to your fork: `git push origin feature/your-feature`
-5. Open a pull request
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for a full overview of how the codebase is structured before writing code.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a full technical overview.
 
 ---
 
@@ -313,6 +219,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 - [edge-tts](https://github.com/rany2/edge-tts) — Microsoft neural voice synthesis
 - [PyQt6](https://riverbankcomputing.com/software/pyqt/) — Desktop UI framework
-- [pyttsx3](https://github.com/nateshmbhat/pyttsx3) — Offline TTS fallback
+- [pyttsx3](https://github.com/nateshmbhat/pyttsx3) — Offline TTS
+- [pygame](https://pygame.org) — Audio playback (both online and offline)
 - [pynput](https://github.com/moses-palmer/pynput) — Global hotkey listener
-- [pygame](https://pygame.org) — Audio playback and mixing

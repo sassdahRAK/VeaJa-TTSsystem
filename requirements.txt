@@ -1,7 +1,44 @@
-PyQt6>=6.4.0
-PyQt6-Qt6>=6.4.0
-pyttsx3>=2.90
-pynput>=1.7.6
-pyperclip>=1.8.2
-edge-tts>=6.1.9
-pygame>=2.5.0
+# Veaja — Python dependencies
+# Tested on Python 3.13. Minimum supported: Python 3.10.
+#
+# Install:
+#   pip install -r requirements.txt
+#
+# Linux users: also install espeak for offline TTS:
+#   sudo apt install espeak espeak-ng
+
+# ── UI framework ──────────────────────────────────────────────────────────────
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.0
+PyQt6_sip==13.11.1
+
+# ── Online TTS (Microsoft Edge neural voices) ─────────────────────────────────
+edge-tts==7.2.8          # edge-tts streams audio via Microsoft Azure TTS
+aiohttp==3.13.5          # async HTTP client used by edge-tts
+aiohappyeyeballs==2.6.1  # happy eyeballs for aiohttp
+aiosignal==1.4.0
+attrs==26.1.0
+frozenlist==1.8.0
+multidict==6.7.1
+propcache==0.4.1
+yarl==1.23.0
+certifi==2026.2.25
+idna==3.11
+
+# ── Offline TTS (system voices via espeak / SAPI5 / AVSpeech) ────────────────
+pyttsx3==2.99            # offline TTS — requires espeak on Linux
+
+# ── Audio playback ────────────────────────────────────────────────────────────
+pygame==2.6.1            # plays MP3/WAV audio for both online and offline modes
+
+# ── Global hotkeys & clipboard ────────────────────────────────────────────────
+pynput==1.8.1            # global Ctrl+C / Ctrl+R hotkey listener
+pyperclip==1.11.0        # cross-platform clipboard read/write
+python-xlib==0.33        # required by pynput on Linux (X11)
+evdev==1.9.3             # required by pynput on Linux (evdev input)
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tabulate==0.10.0         # table formatting (used in history/analyse pages)
+typing_extensions==4.15.0
+six==1.17.0
+packaging==26.1

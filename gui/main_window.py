@@ -244,14 +244,27 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         grip.setFixedSize(14, 14)
         grip.move(self.width() - 14, self.height() - 14)
 
+        # Sidebar is open by default
+        self._sidebar_open = True
+
     def _build_title_bar(self) -> QWidget:
         bar = _DragBar(self)
         bar.setObjectName("titleBar")
         bar.setFixedHeight(self._title_bar_height)
 
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(14, 0, 0, 0)
+        lay.setContentsMargins(6, 0, 0, 0)
         lay.setSpacing(0)
+
+        # ── Hamburger button — toggles sidebar ────────────────────────────
+        self._hamburger_btn = QPushButton("☰")
+        self._hamburger_btn.setObjectName("hamburgerBtn")
+        self._hamburger_btn.setFixedSize(36, self._title_bar_height)
+        self._hamburger_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hamburger_btn.setToolTip("Toggle sidebar")
+        self._hamburger_btn.clicked.connect(self._toggle_sidebar)
+        lay.addWidget(self._hamburger_btn)
+        lay.addSpacing(6)
 
         # App icon (small, displayed as circle)
         self._titlebar_icon = QLabel()
@@ -294,6 +307,25 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         lay.addWidget(self._close_btn_tb)
 
         return bar
+
+    def _toggle_sidebar(self) -> None:
+        """Collapse or expand the sidebar. The hamburger button always stays visible."""
+        if self._sidebar_open:
+            # Save current width so we can restore it on re-open
+            self._sidebar_last_width = self._sidebar_widget.width()
+            # Collapse: set sidebar to 0 width
+            self._splitter.setSizes([0, 9999])
+            self._sidebar_widget.hide()
+            self._sidebar_open = False
+        else:
+            # Restore to last known width (or default 240)
+            restore = getattr(self, "_sidebar_last_width", scaled(240))
+            restore = max(restore, scaled(160))
+            self._sidebar_widget.show()
+            self._splitter.setSizes([restore, 9999])
+            self._sidebar_open = True
+            # Resize logo to fit restored width
+            QTimer.singleShot(0, self._resize_sidebar_logo)
 
     def _reload_titlebar_icon(self):
         if not hasattr(self, "_titlebar_icon"):

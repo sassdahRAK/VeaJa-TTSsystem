@@ -166,6 +166,19 @@ QLabel#titleBarText {{
     background: transparent;
     letter-spacing: 0.2px;
 }}
+QPushButton#hamburgerBtn {{
+    background: transparent;
+    color: {text_c};
+    border: none;
+    font-size: 16px;
+    border-radius: 6px;
+}}
+QPushButton#hamburgerBtn:hover {{
+    background: {btn_h};
+}}
+QPushButton#hamburgerBtn:pressed {{
+    background: {btn_h};
+}}
 QPushButton#titleBarMin, QPushButton#titleBarMax {{
     background: transparent;
     color: {text_c};
