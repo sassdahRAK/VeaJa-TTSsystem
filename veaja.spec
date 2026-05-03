@@ -1,13 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec file for Veaja
-# Run: pyinstaller veaja.spec
+# Run: pyinstaller veaja.spec --clean --noconfirm
 
+import sys
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
-# Collect all data files
+# ── Data files bundled into the exe ──────────────────────────────────────────
 datas = [
     ('assets',   'assets'),
     ('styles',   'styles'),
@@ -15,24 +16,47 @@ datas = [
     ('config',   'config'),
 ]
 
-# Collect edge-tts and pyttsx3 submodules
+# ── Hidden imports not auto-detected by PyInstaller ──────────────────────────
 hiddenimports = [
+    # TTS — online
     'edge_tts',
+    'edge_tts.communicate',
+    'edge_tts.list_voices',
+    # TTS — offline
     'pyttsx3',
     'pyttsx3.drivers',
     'pyttsx3.drivers.espeak',
     'pyttsx3.drivers.sapi5',
     'pyttsx3.drivers.nsss',
+    # Windows SAPI5 COM (used by our offline WAV-render path)
+    'comtypes',
+    'comtypes.client',
+    'comtypes.server',
+    'comtypes.typeinfo',
+    # Audio
     'pygame',
     'pygame.mixer',
+    # Input / clipboard
     'pynput',
     'pynput.keyboard',
     'pynput.mouse',
+    'pynput._util',
+    'pynput._util.win32',
     'pyperclip',
+    # Qt
     'PyQt6.QtSvg',
     'PyQt6.QtCore',
     'PyQt6.QtGui',
     'PyQt6.QtWidgets',
+    'PyQt6.QtNetwork',
+    # Async (used by edge-tts)
+    'asyncio',
+    'aiohttp',
+    'aiohttp.connector',
+    # Misc
+    'certifi',
+    'tabulate',
+    'winreg',
 ]
 
 a = Analysis(
@@ -44,7 +68,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'numpy', 'scipy'],
+    excludes=[
+        'tkinter', 'matplotlib', 'numpy', 'scipy',
+        'IPython', 'jupyter', 'notebook',
+        'test', 'unittest',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -58,7 +86,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='veaja',
+    name='Veaja',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -69,6 +97,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/veaja.ico',
+    version_file=None,
 )
 
 coll = COLLECT(
@@ -79,5 +108,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='veaja',
+    name='Veaja',
 )

@@ -305,6 +305,7 @@ class OverlayWidget(QWidget):
         self._paused: bool = False
         self._press_pos: QPoint | None = None
         self._dragging: bool = False
+        self._drag_offset: QPoint = QPoint()   # offset from overlay top-left at press
         self._expanded: bool = False
         self._label_drag_mode: bool = False       # free-drag after double-click on label
         self._label_drag_offset: QPoint = QPoint()
@@ -833,20 +834,17 @@ class OverlayWidget(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self._is_linux() and not self._label_drag_mode:
-                # On Linux (X11 + Wayland) delegate dragging to the window
-                # manager via startSystemMove().  self.move() alone is
-                # unreliable on X11 and a no-op on Wayland.
-                handle = self.windowHandle()
-                if handle:
-                    handle.startSystemMove()
-                    # Still record press so click-vs-drag detection works on
-                    # mouse release (startSystemMove doesn't block).
-                    self._press_pos = event.globalPosition().toPoint()
-                    self._dragging = False
-                    return
             self._press_pos = event.globalPosition().toPoint()
+            # Record the offset from the overlay's top-left so the overlay
+            # stays exactly where the user grabbed it during the drag.
+            self._drag_offset = self._press_pos - self.pos()
             self._dragging = False
+
+            if self._is_linux() and not self._label_drag_mode:
+                # On Linux delegate to the WM via startSystemMove() once the
+                # user actually starts dragging (handled in mouseMoveEvent).
+                # We still record press_pos here for click-vs-drag detection.
+                pass
         elif event.button() == Qt.MouseButton.RightButton:
             self._show_context_menu(event.globalPosition().toPoint())
 
@@ -862,19 +860,31 @@ class OverlayWidget(QWidget):
             self.move(new_pos)
             return
 
-        if self._is_linux():
-            return  # WM handles the move; nothing to do here
-
         if self._press_pos is None:
             return
-        if event.buttons() & Qt.MouseButton.LeftButton:
-            delta = event.globalPosition().toPoint() - self._press_pos
-            if not self._dragging and delta.manhattanLength() > DRAG_PX:
-                self._dragging = True
-            if self._dragging:
-                new_top_left = (event.globalPosition().toPoint()
-                                - QPoint(self.width() // 2, self.height() // 2))
-                self.move(new_top_left)
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+
+        delta = event.globalPosition().toPoint() - self._press_pos
+        if not self._dragging and delta.manhattanLength() > DRAG_PX:
+            self._dragging = True
+
+            if self._is_linux():
+                # Delegate to WM now that we know it's a drag, not a click.
+                handle = self.windowHandle()
+                if handle:
+                    handle.startSystemMove()
+                return
+
+        if self._dragging and not self._is_linux():
+            # Move so the overlay stays under the exact grab point.
+            new_pos = event.globalPosition().toPoint() - self._drag_offset
+            screen = QApplication.primaryScreen().availableGeometry()
+            new_pos.setX(max(screen.left(),
+                             min(new_pos.x(), screen.right()  - self.width())))
+            new_pos.setY(max(screen.top(),
+                             min(new_pos.y(), screen.bottom() - self.height())))
+            self.move(new_pos)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

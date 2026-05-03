@@ -471,6 +471,12 @@ class Pyttsx3Worker(QThread):
     # ── Worker thread body ────────────────────────────────────────────────────
 
     def run(self):
+        # ── Windows SAPI5: speak directly — save_to_file produces empty WAVs ──
+        if sys.platform == "win32":
+            self._run_windows_sapi()
+            return
+
+        # ── Linux / macOS: render to WAV then play via pygame ─────────────────
         tmp_files: list[str] = []
         owns_files = True   # True = we rendered them, we delete them on exit
         try:
@@ -619,6 +625,174 @@ class Pyttsx3Worker(QThread):
                         pass
             self.finished_speaking.emit()
 
+    def _run_windows_sapi(self):
+        """
+        Windows offline TTS — mirrors the Linux path exactly:
+          1. Use SAPI5 SpFileStream to render each sentence to a temp WAV.
+             (pyttsx3 save_to_file() produces empty WAVs on Windows — we use
+              comtypes directly to work around that bug.)
+          2. Play each WAV via pygame.mixer.music — instant stop/pause/resume.
+
+        This gives the same sentence-chunked, instantly-stoppable behaviour
+        as the Linux/macOS pygame path.
+        """
+        tmp_files: list[str] = []
+        owns_files = True
+
+        try:
+            # ── Use cached WAVs if available ──────────────────────────────────
+            if self._cached_wavs:
+                tmp_files = list(self._cached_wavs)
+                owns_files = False
+                self.preparing_speech.emit()
+            else:
+                self.preparing_speech.emit()
+
+                try:
+                    import comtypes.client
+                    import comtypes
+
+                    voice = comtypes.client.CreateObject("SAPI.SpVoice")
+
+                    # Map pyttsx3 rate (words/min, ~175 default) → SAPI rate (-10..+10)
+                    sapi_rate = max(-10, min(10, int((self._rate - 175) / 25)))
+                    voice.Rate   = sapi_rate
+                    voice.Volume = max(0, min(100, int(self._volume * 100)))
+
+                    if self._voice_id:
+                        try:
+                            for v in voice.GetVoices():
+                                if v.Id == self._voice_id:
+                                    voice.Voice = v
+                                    break
+                        except Exception:
+                            pass
+
+                except Exception as exc:
+                    self.error_occurred.emit(f"Failed to initialize SAPI5: {exc}")
+                    self.finished_speaking.emit()
+                    return
+
+                chunks = _split_sentences(self._text)
+                if len(chunks) > MAX_SENTENCE_QUEUE:
+                    self.error_occurred.emit(
+                        f"Text too long ({len(chunks)} sentences). "
+                        f"Reading the first {MAX_SENTENCE_QUEUE}."
+                    )
+                    chunks = chunks[:MAX_SENTENCE_QUEUE]
+
+                # SpFileStream open mode: SSFMCreateForWrite = 3
+                SSFMCreateForWrite = 3
+
+                for sentence in chunks:
+                    sentence = sentence.strip()
+                    if not sentence or self._stop_flag.is_set():
+                        break
+
+                    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                    tmp.close()
+
+                    try:
+                        stream = comtypes.client.CreateObject("SAPI.SpFileStream")
+                        stream.Open(tmp.name, SSFMCreateForWrite, False)
+                        old_stream = voice.AudioOutputStream
+                        voice.AudioOutputStream = stream
+                        # SVSFDefault = 0 (synchronous)
+                        voice.Speak(sentence, 0)
+                        stream.Close()
+                        voice.AudioOutputStream = old_stream
+                        if os.path.getsize(tmp.name) > 64:
+                            tmp_files.append(tmp.name)
+                        else:
+                            os.remove(tmp.name)
+                    except Exception as exc:
+                        self.error_occurred.emit(f"TTS render error: {exc}")
+                        try:
+                            os.remove(tmp.name)
+                        except Exception:
+                            pass
+
+                try:
+                    del voice
+                except Exception:
+                    pass
+
+                # Cache for instant replay on restart
+                if tmp_files and self._engine_ref is not None:
+                    try:
+                        self._engine_ref.store_wav_cache(self._text, tmp_files)
+                        owns_files = False
+                    except Exception:
+                        owns_files = True
+
+            if not tmp_files or self._stop_flag.is_set():
+                return
+
+            # ── Playback phase: pygame plays each WAV (same as Linux) ─────────
+            self.started_speaking.emit()
+
+            for wav_path in tmp_files:
+                if self._stop_flag.is_set():
+                    break
+
+                if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 64:
+                    continue
+
+                try:
+                    pygame.mixer.music.load(wav_path)
+                    pygame.mixer.music.set_volume(self._volume)
+                    pygame.mixer.music.play()
+                except Exception as exc:
+                    self.error_occurred.emit(f"Audio playback error: {exc}")
+                    continue
+
+                while pygame.mixer.music.get_busy():
+                    if self._stop_flag.is_set():
+                        pygame.mixer.music.stop()
+                        break
+
+                    if self._pause_flag.is_set():
+                        pygame.mixer.music.pause()
+                        self.paused_speaking.emit()
+                        while self._pause_flag.is_set():
+                            if self._stop_flag.is_set():
+                                pygame.mixer.music.stop()
+                                break
+                            self.msleep(40)
+                        else:
+                            pygame.mixer.music.unpause()
+                            self.resumed_speaking.emit()
+                        if self._stop_flag.is_set():
+                            break
+
+                    self.msleep(40)
+
+                try:
+                    pygame.mixer.music.unload()
+                except Exception:
+                    pass
+
+                if self._stop_flag.is_set():
+                    break
+
+        except Exception as exc:
+            if not self._stop_flag.is_set():
+                self.error_occurred.emit(f"Unexpected TTS error: {exc}")
+        finally:
+            try:
+                pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
+            except Exception:
+                pass
+            if owns_files:
+                for f in tmp_files:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except Exception:
+                        pass
+            self.finished_speaking.emit()
+
     # ── Pause / resume — NOW SUPPORTED via pygame ─────────────────────────────
 
     def pause(self):
@@ -631,8 +805,8 @@ class Pyttsx3Worker(QThread):
 
     def stop(self):
         """
-        Instantly stop playback. Non-blocking — pygame.mixer.music.stop()
-        returns immediately. The run() loop detects the flag within 40 ms.
+        Instantly stop playback. Non-blocking.
+        All platforms now use pygame for playback, so we stop it directly.
         """
         self._stop_flag.set()
         self._pause_flag.clear()
@@ -640,13 +814,6 @@ class Pyttsx3Worker(QThread):
             pygame.mixer.music.stop()
         except Exception:
             pass
-        # Schedule cleanup — non-blocking so UI stays responsive
-        from PyQt6.QtCore import QTimer
-        def _cleanup():
-            if self.isRunning():
-                self.terminate()
-                self.wait(200)
-        QTimer.singleShot(600, _cleanup)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -886,10 +1053,11 @@ class TTSEngine:
             except Exception:
                 pass
             w.stop()
-            # Clear the stopping flag after a short delay — enough time for
-            # the worker's QTimer cleanup to fire without blocking the UI.
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(200, self._clear_stopping)
+            # Clear _stopping immediately — both SAPI5 (Windows) and pygame
+            # (Linux/macOS) stop synchronously. The worker thread may still be
+            # winding down but signals are already disconnected so it's safe
+            # to start a new worker right away.
+            self._stopping = False
         else:
             self._stopping = False
 
