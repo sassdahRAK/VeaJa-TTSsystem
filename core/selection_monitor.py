@@ -158,10 +158,16 @@ class SelectionMonitor(QObject):
     def _schedule_force_check(self):
         """
         Received on the Qt main thread from the pynput bridge signal.
-        Wait 80 ms so the OS has time to write the new text to the clipboard
-        before we read it, then do the check.
+
+        Large text selections (multiple paragraphs) take longer for the OS
+        to write to the clipboard. We use a two-stage check:
+          1. After 150ms  — catches most normal copies
+          2. After 400ms  — catches large selections that took longer to write
+
+        The second check is a no-op if the text didn't change.
         """
-        QTimer.singleShot(80, self._force_check)    # safe: Qt thread ✓
+        QTimer.singleShot(150, self._force_check)    # fast check
+        QTimer.singleShot(400, self._force_check)    # safety net for large selections
 
     @pyqtSlot()
     def _on_read_hotkey_fired(self):
@@ -190,13 +196,20 @@ class SelectionMonitor(QObject):
 
     @pyqtSlot()
     def _force_check(self):
-        """Re-read clipboard even if the dataChanged signal did not fire."""
-        # Guard: skip if clipboard has no text (e.g. image was copied)
+        """Re-read clipboard even if the dataChanged signal did not fire.
+
+        Also handles the case where the clipboard was partially written on the
+        first check (large selections) — if the new text is longer than what
+        we last emitted, emit again with the full text.
+        """
         mime = self._clipboard.mimeData()
         if mime is None or not mime.hasText():
             return
         text = self._clipboard.text().strip()
-        if text and text != self._last_text:
+        if not text:
+            return
+        # Emit if: new text, OR the text grew (clipboard was partially written before)
+        if text != self._last_text or len(text) > len(self._last_text):
             self._emit_if_allowed(text)
 
     # ------------------------------------------------------------------ #
@@ -205,19 +218,19 @@ class SelectionMonitor(QObject):
 
     def _emit_if_allowed(self, text: str):
         """
-        Emit text_ready only if enough time has passed since the last emission.
-
-        This prevents QTextCursor position errors and UI flicker that occurred
-        when dataChanged fired multiple times for a single copy operation, or
-        when both the Qt clipboard watcher and the pynput path triggered for
-        the same Cmd+C press.
+        Emit text_ready only if enough time has passed since the last emission,
+        OR if the new text is longer than what was last emitted (large selection
+        that was partially written to clipboard on the first check).
         """
         now = time.monotonic()
-        if now - self._last_emit_time < _DEBOUNCE_MS / 1000:
-            # Too soon — update last_text so we don't re-emit stale text,
-            # but skip the signal to avoid rapid-fire UI updates.
+        text_grew = len(text) > len(self._last_text)
+        too_soon  = (now - self._last_emit_time) < _DEBOUNCE_MS / 1000
+
+        if too_soon and not text_grew:
+            # Too soon and text didn't grow — skip to avoid rapid-fire UI updates
             self._last_text = text
             return
+
         self._last_text = text
         self._last_emit_time = now
         self.text_ready.emit(text)
