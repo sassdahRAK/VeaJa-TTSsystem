@@ -54,6 +54,17 @@ class SelectionMonitor(QObject):
         self._clipboard = QApplication.clipboard()
         self._clipboard.dataChanged.connect(self._on_clipboard_change)
 
+        # On Linux, also watch the X11 PRIMARY selection (mouse-select buffer).
+        # Some browsers only put partial text in CLIPBOARD on Ctrl+C but always
+        # put the full selection in PRIMARY. We check both and use the longer one.
+        self._selection_clipboard = QApplication.clipboard()
+        if platform.system() == "Linux":
+            try:
+                from PyQt6.QtGui import QClipboard
+                self._selection_clipboard = QApplication.clipboard()
+            except Exception:
+                pass
+
         # Wire the pynput bridge: QueuedConnection guarantees the slot
         # runs on the Qt main thread regardless of which thread emits.
         self._pynput_copy_detected.connect(
@@ -74,13 +85,22 @@ class SelectionMonitor(QObject):
 
     @pyqtSlot()
     def _on_clipboard_change(self):
-        # Guard: skip immediately if clipboard contains non-text data (image, file, etc.)
-        # Accessing image/file data on the main thread can cause a freeze.
         cb = self._clipboard
         mime = cb.mimeData()
         if mime is None or not mime.hasText():
             return
         text = cb.text().strip()
+
+        # Linux: also check PRIMARY selection — use whichever is longer
+        if platform.system() == "Linux":
+            try:
+                from PyQt6.QtGui import QClipboard
+                primary = cb.text(QClipboard.Mode.Selection).strip()
+                if len(primary) > len(text):
+                    text = primary
+            except Exception:
+                pass
+
         if text and text != self._last_text:
             self._emit_if_allowed(text)
 
@@ -196,19 +216,30 @@ class SelectionMonitor(QObject):
 
     @pyqtSlot()
     def _force_check(self):
-        """Re-read clipboard even if the dataChanged signal did not fire.
-
-        Also handles the case where the clipboard was partially written on the
-        first check (large selections) — if the new text is longer than what
-        we last emitted, emit again with the full text.
+        """Re-read clipboard. On Linux, also checks the PRIMARY selection
+        (mouse-select buffer) and uses whichever is longer — some browsers
+        only copy partial text to CLIPBOARD but always have the full selection
+        in PRIMARY.
         """
         mime = self._clipboard.mimeData()
         if mime is None or not mime.hasText():
             return
         text = self._clipboard.text().strip()
+
+        # Linux: also check PRIMARY selection — use whichever is longer
+        if platform.system() == "Linux":
+            try:
+                from PyQt6.QtGui import QClipboard
+                primary_text = self._clipboard.text(
+                    QClipboard.Mode.Selection
+                ).strip()
+                if len(primary_text) > len(text):
+                    text = primary_text
+            except Exception:
+                pass
+
         if not text:
             return
-        # Emit if: new text, OR the text grew (clipboard was partially written before)
         if text != self._last_text or len(text) > len(self._last_text):
             self._emit_if_allowed(text)
 
@@ -219,15 +250,13 @@ class SelectionMonitor(QObject):
     def _emit_if_allowed(self, text: str):
         """
         Emit text_ready only if enough time has passed since the last emission,
-        OR if the new text is longer than what was last emitted (large selection
-        that was partially written to clipboard on the first check).
+        OR if the new text is longer than what was last emitted.
         """
         now = time.monotonic()
         text_grew = len(text) > len(self._last_text)
         too_soon  = (now - self._last_emit_time) < _DEBOUNCE_MS / 1000
 
         if too_soon and not text_grew:
-            # Too soon and text didn't grow — skip to avoid rapid-fire UI updates
             self._last_text = text
             return
 
