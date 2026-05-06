@@ -523,7 +523,15 @@ class Pyttsx3Worker(QThread):
         # ── Producer: pyttsx3 renders WAVs sentence-by-sentence ───────────────
         def _producer():
             lock = self._pyttsx3_lock
+            if lock:
+                lock.acquire()
             try:
+                engine = pyttsx3.init()
+                engine.setProperty("rate",   self._rate)
+                engine.setProperty("volume", 1.0)
+                if self._voice_id:
+                    engine.setProperty("voice", self._voice_id)
+
                 for sentence in chunks:
                     sentence = sentence.strip()
                     if not sentence or self._stop_flag.is_set():
@@ -531,38 +539,16 @@ class Pyttsx3Worker(QThread):
 
                     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                     tmp.close()
-
-                    # Hold the lock only for this one sentence render
-                    if lock:
-                        lock.acquire()
                     try:
-                        engine = pyttsx3.init()
-                        engine.setProperty("rate",   self._rate)
-                        engine.setProperty("volume", 1.0)
-                        if self._voice_id:
-                            engine.setProperty("voice", self._voice_id)
                         engine.save_to_file(sentence, tmp.name)
                         engine.runAndWait()
-                        try:
-                            engine.stop()
-                            del engine
-                        except Exception:
-                            pass
                     except Exception as exc:
                         render_error.append(str(exc))
                         try:
                             os.remove(tmp.name)
                         except Exception:
                             pass
-                        if lock:
-                            lock.release()
                         continue
-                    finally:
-                        if lock and lock.locked():
-                            try:
-                                lock.release()
-                            except RuntimeError:
-                                pass  # already released in except branch
 
                     if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 64:
                         wav_queue.put(tmp.name)
@@ -572,9 +558,20 @@ class Pyttsx3Worker(QThread):
                         except Exception:
                             pass
 
+                try:
+                    engine.stop()
+                    del engine
+                except Exception:
+                    pass
+
             except Exception as exc:
                 render_error.append(str(exc))
             finally:
+                if lock:
+                    try:
+                        lock.release()
+                    except RuntimeError:
+                        pass
                 wav_queue.put(None)   # sentinel — consumer knows we're done
 
         producer_thread = threading.Thread(target=_producer, daemon=True,
