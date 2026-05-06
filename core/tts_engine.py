@@ -4,7 +4,11 @@ TTS engine — two backends:
                       Streams sentence-by-sentence → first audio in ~1 s.
                       Supports pause / resume via pygame.
                       Saves combined reading session as a single MP3 file.
-  2. Pyttsx3Worker  — SAPI5 system voices (offline fallback, no pause support).
+  2. Pyttsx3Worker  — System voices (offline fallback).
+                      Both Linux (espeak) and Windows (SAPI5) use a true
+                      producer-consumer pipeline: a background thread renders
+                      each sentence to a WAV file while pygame plays the
+                      previous one — first audio plays immediately.
 
 Signal lifecycle (in order):
   preparing_speech  → synthesis started          → show "Processing…"
@@ -487,22 +491,24 @@ class Pyttsx3Worker(QThread):
 
     def _run_pipeline(self):
         """
-        Producer-consumer pipeline for offline TTS.
+        True producer-consumer pipeline for Linux/macOS offline TTS.
 
-        Renders and plays sentence-by-sentence in the same thread:
-          1. Render sentence N to WAV
-          2. Start playing sentence N via pygame (non-blocking play())
-          3. While pygame plays N, render sentence N+1
-          4. Wait for N to finish, then play N+1
+        A background producer thread renders sentences one-by-one to WAV
+        files using pyttsx3/espeak, putting each path into a queue as soon
+        as it is ready.  The main worker thread (consumer) plays each WAV
+        via pygame the moment it arrives — so sentence 1 starts playing
+        while sentence 2 is still being rendered.
 
-        This gives the same latency benefit as a separate producer thread
-        but without the espeak thread-safety issue (segfault).
+        espeak thread-safety: pyttsx3.init() + runAndWait() are called
+        exclusively inside the producer thread, which holds the global
+        pyttsx3_lock for each sentence.  The lock is released between
+        sentences so other parts of the app can access espeak if needed.
         """
         import queue as _queue
 
+        wav_queue: _queue.Queue = _queue.Queue()
         all_rendered_files: list[str] = []
         render_error: list[str] = []
-        owns_files = True
 
         self.preparing_speech.emit()
 
@@ -514,66 +520,92 @@ class Pyttsx3Worker(QThread):
             )
             chunks = chunks[:MAX_SENTENCE_QUEUE]
 
-        # Acquire pyttsx3 lock for the entire render session
-        lock = self._pyttsx3_lock
-        if lock:
-            lock.acquire()
-
-        engine = None
-        try:
+        # ── Producer: pyttsx3 renders WAVs sentence-by-sentence ───────────────
+        def _producer():
+            lock = self._pyttsx3_lock
             try:
-                engine = pyttsx3.init()
-                engine.setProperty("rate",   self._rate)
-                engine.setProperty("volume", 1.0)
-                if self._voice_id:
-                    engine.setProperty("voice", self._voice_id)
-            except Exception as exc:
-                self.error_occurred.emit(
-                    f"Failed to initialize TTS engine: {exc}\n"
-                    "On Linux, install espeak: sudo apt install espeak espeak-ng"
-                )
-                return
+                for sentence in chunks:
+                    sentence = sentence.strip()
+                    if not sentence or self._stop_flag.is_set():
+                        break
 
-            started = False
+                    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                    tmp.close()
 
-            for i, sentence in enumerate(chunks):
-                sentence = sentence.strip()
-                if not sentence or self._stop_flag.is_set():
-                    break
+                    # Hold the lock only for this one sentence render
+                    if lock:
+                        lock.acquire()
+                    try:
+                        engine = pyttsx3.init()
+                        engine.setProperty("rate",   self._rate)
+                        engine.setProperty("volume", 1.0)
+                        if self._voice_id:
+                            engine.setProperty("voice", self._voice_id)
+                        engine.save_to_file(sentence, tmp.name)
+                        engine.runAndWait()
+                        try:
+                            engine.stop()
+                            del engine
+                        except Exception:
+                            pass
+                    except Exception as exc:
+                        render_error.append(str(exc))
+                        try:
+                            os.remove(tmp.name)
+                        except Exception:
+                            pass
+                        if lock:
+                            lock.release()
+                        continue
+                    finally:
+                        if lock and lock.locked():
+                            try:
+                                lock.release()
+                            except RuntimeError:
+                                pass  # already released in except branch
 
-                # ── Render this sentence to WAV ───────────────────────────────
-                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-                tmp.close()
-                rendered = False
-                try:
-                    engine.save_to_file(sentence, tmp.name)
-                    engine.runAndWait()
                     if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 64:
-                        all_rendered_files.append(tmp.name)
-                        rendered = True
+                        wav_queue.put(tmp.name)
                     else:
                         try:
                             os.remove(tmp.name)
                         except Exception:
                             pass
-                except Exception as exc:
-                    render_error.append(str(exc))
-                    try:
-                        os.remove(tmp.name)
-                    except Exception:
-                        pass
 
-                if not rendered or self._stop_flag.is_set():
+            except Exception as exc:
+                render_error.append(str(exc))
+            finally:
+                wav_queue.put(None)   # sentinel — consumer knows we're done
+
+        producer_thread = threading.Thread(target=_producer, daemon=True,
+                                           name="espeak-producer")
+        producer_thread.start()
+
+        # ── Consumer: plays WAVs as they arrive ───────────────────────────────
+        started = False
+        owns_files = True
+
+        try:
+            while True:
+                try:
+                    wav_path = wav_queue.get(timeout=0.05)
+                except Exception:
+                    if self._stop_flag.is_set():
+                        break
                     continue
 
-                wav_path = all_rendered_files[-1]
+                if wav_path is None:   # sentinel
+                    break
 
-                # ── Emit started on first sentence ────────────────────────────
+                all_rendered_files.append(wav_path)
+
+                if self._stop_flag.is_set():
+                    break
+
                 if not started:
                     self.started_speaking.emit()
                     started = True
 
-                # ── Play this sentence via pygame ─────────────────────────────
                 try:
                     pygame.mixer.music.load(wav_path)
                     pygame.mixer.music.set_volume(self._volume)
@@ -582,7 +614,6 @@ class Pyttsx3Worker(QThread):
                     self.error_occurred.emit(f"Audio playback error: {exc}")
                     continue
 
-                # Poll while playing — check stop/pause every 40ms
                 while pygame.mixer.music.get_busy():
                     if self._stop_flag.is_set():
                         pygame.mixer.music.stop()
@@ -614,15 +645,7 @@ class Pyttsx3Worker(QThread):
             if not self._stop_flag.is_set():
                 self.error_occurred.emit(f"Unexpected TTS error: {exc}")
         finally:
-            try:
-                if engine is not None:
-                    engine.stop()
-                    del engine
-            except Exception:
-                pass
-            if lock:
-                lock.release()
-
+            producer_thread.join(timeout=3.0)
             try:
                 pygame.mixer.music.stop()
                 pygame.mixer.music.unload()
