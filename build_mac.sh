@@ -1,7 +1,7 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Veaja — macOS build script
-# Produces: dist/Veaja.app  and  dist/veaja-1.0.0-macos.dmg
+# Produces: dist/Veaja.app  and  dist/veaja-1.1.0-macos.dmg
 #
 # Requirements:
 #   - macOS 12+
@@ -16,7 +16,7 @@
 set -e
 cd "$(dirname "$0")"
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 echo "==> Activating venv..."
 source venv/bin/activate

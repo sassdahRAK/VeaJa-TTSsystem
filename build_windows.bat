@@ -1,8 +1,8 @@
 @echo off
 REM ─────────────────────────────────────────────────────────────────────────────
 REM Veaja — Windows build script
-REM Produces: dist\veaja-1.0.0-windows-x64\veaja.exe
-REM           dist\veaja-1.0.0-windows-x64.zip
+REM Produces: dist\veaja-1.1.0-windows-x64\veaja.exe
+REM           dist\veaja-1.1.0-windows-x64.zip
 REM
 REM Requirements:
 REM   - Python 3.10+ with venv at .\venv
@@ -13,7 +13,7 @@ REM   build_windows.bat
 REM ─────────────────────────────────────────────────────────────────────────────
 
 setlocal
-set VERSION=1.0.0
+set VERSION=1.1.0
 set OUTPUT=veaja-%VERSION%-windows-x64
 
 echo =^> Activating venv...

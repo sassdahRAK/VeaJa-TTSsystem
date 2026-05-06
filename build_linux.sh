@@ -1,7 +1,7 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Veaja — Linux build script
-# Produces: dist/veaja-1.0.0-linux-x86_64.tar.gz
+# Produces: dist/veaja-1.1.0-linux-x86_64.tar.gz
 #
 # Usage:
 #   chmod +x build_linux.sh
@@ -10,7 +10,7 @@
 
 set -e
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 ARCH=$(uname -m)
 OUTPUT="veaja-${VERSION}-linux-${ARCH}"
 

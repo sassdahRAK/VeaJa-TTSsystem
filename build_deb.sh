@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Veaja — .deb package builder
 #
-# Produces: dist/veaja_1.0.0_amd64.deb
+# Produces: dist/veaja_1.1.0_amd64.deb
 #
 # The .deb installs:
 #   /opt/veaja/              — app files + bundled venv
@@ -20,7 +20,7 @@
 
 set -e
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 ARCH="amd64"
 PKG_NAME="veaja"
 PKG_DIR="dist/deb_build/${PKG_NAME}_${VERSION}_${ARCH}"
