@@ -35,7 +35,7 @@ pygame==2.6.1            # plays MP3/WAV audio for both online and offline modes
 pynput==1.8.1            # global Ctrl+C / Ctrl+R hotkey listener
 pyperclip==1.11.0        # cross-platform clipboard read/write
 python-xlib==0.33        # required by pynput on Linux (X11)
-evdev==1.9.3             # required by pynput on Linux (evdev input)
+evdev==1.9.3; sys_platform == "linux"  # required by pynput on Linux (evdev input)
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 tabulate==0.10.0         # table formatting (used in history/analyse pages)

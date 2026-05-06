@@ -367,9 +367,13 @@ class AppController(QObject):
         - Different action (e.g. pause then stop): always allowed
         """
         if self._tts.is_paused():
-            # Resume is instant — no debounce
-            self._last_action = "resume"
-            self._resume_speaking()
+            # Only resume if the worker is actually still alive
+            if self._tts._worker and self._tts._worker.isRunning():
+                self._last_action = "resume"
+                self._resume_speaking()
+            else:
+                # Worker died while paused — reset UI to idle
+                self._on_speaking_finished()
 
         elif self._tts.is_speaking():
             # Pause is instant — no debounce

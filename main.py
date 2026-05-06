@@ -60,7 +60,6 @@ def _acquire_instance_lock():
 
     Returns the lock file path so the caller can clean it up on exit.
     """
-    import fcntl
     from pathlib import Path
 
     lock_dir  = Path.home() / ".veaja"
@@ -84,6 +83,10 @@ def _acquire_instance_lock():
                 msg.setIcon(QMessageBox.Icon.Information)
                 msg.exec()
                 sys.exit(0)
+            # Keep a module-level reference so the mutex is NOT garbage collected.
+            # If mutex is a local var it gets released when this function returns,
+            # allowing a second instance to open freely.
+            _acquire_instance_lock._win_mutex = mutex
         except Exception:
             pass
         return None
@@ -91,6 +94,7 @@ def _acquire_instance_lock():
     else:
         # Linux / macOS: use fcntl file lock (released automatically on process exit)
         try:
+            import fcntl
             lock_file = open(lock_path, "w")
             fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
             lock_file.write(str(os.getpid()))
