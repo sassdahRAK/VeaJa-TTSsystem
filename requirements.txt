@@ -42,3 +42,8 @@ tabulate==0.10.0         # table formatting (used in history/analyse pages)
 typing_extensions==4.15.0
 six==1.17.0
 packaging==26.1
+
+# ── Windows only ──────────────────────────────────────────────────────────────
+# comtypes is required on Windows for offline TTS (SAPI5 SpFileStream WAV render).
+# On Linux/macOS this package is not needed and will be ignored if not installed.
+# comtypes==1.4.8
