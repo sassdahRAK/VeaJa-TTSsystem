@@ -471,40 +471,62 @@ class Pyttsx3Worker(QThread):
     # ── Worker thread body ────────────────────────────────────────────────────
 
     def run(self):
-        # ── Windows SAPI5: speak directly — save_to_file produces empty WAVs ──
+        # ── Windows SAPI5: use pipeline renderer ──────────────────────────────
         if sys.platform == "win32":
             self._run_windows_sapi()
             return
 
-        # ── Linux / macOS: render to WAV then play via pygame ─────────────────
-        tmp_files: list[str] = []
-        owns_files = True   # True = we rendered them, we delete them on exit
-        try:
-            # ── Use cached WAVs if available (same text, instant replay) ──────
-            if self._cached_wavs:
-                tmp_files = list(self._cached_wavs)
-                owns_files = False   # cache owner manages these files
-                self.preparing_speech.emit()
-            else:
-                # ── Render phase: pyttsx3 → WAV files ────────────────────────
-                self.preparing_speech.emit()
+        # ── Linux / macOS: pipeline render + play ─────────────────────────────
+        # Use cached WAVs if available (same text → instant replay)
+        if self._cached_wavs:
+            self._play_wav_list(list(self._cached_wavs), owns_files=False)
+            return
 
-                # Acquire the lock — espeak is not thread-safe; concurrent
-                # pyttsx3.init() calls cause segfaults on Linux.
-                lock = self._pyttsx3_lock
-                if lock:
-                    lock.acquire()
-                try:
-                    engine = pyttsx3.init()
-                except Exception as exc:
-                    if lock:
-                        lock.release()
-                    self.error_occurred.emit(
-                        f"Failed to initialize TTS engine: {exc}\n"
-                        "On Linux, install espeak: sudo apt install espeak espeak-ng"
-                    )
-                    return
+        # Pipeline: render sentences in a background thread, play as they arrive
+        self._run_pipeline()
 
+    def _run_pipeline(self):
+        """
+        Producer-consumer pipeline for offline TTS:
+
+          Producer thread  →  renders sentence WAVs via pyttsx3
+          Main worker      →  plays each WAV via pygame as soon as it's ready
+
+        Timeline (3 sentences):
+          t=0   render s1 starts
+          t=0.3 s1 ready → play s1 + render s2 starts simultaneously
+          t=0.6 s2 ready → play s2 + render s3 starts simultaneously
+          t=0.9 s3 ready → play s3
+
+        vs old approach (render ALL then play):
+          t=0   render s1
+          t=0.3 render s2
+          t=0.6 render s3
+          t=0.9 play s1, s2, s3  ← user waits 0.9s before hearing anything
+        """
+        import queue as _queue
+
+        wav_queue: _queue.Queue = _queue.Queue()
+        all_rendered_files: list[str] = []   # for cache storage after done
+        render_error: list[str] = []
+
+        self.preparing_speech.emit()
+
+        chunks = _split_sentences(self._text)
+        if len(chunks) > MAX_SENTENCE_QUEUE:
+            self.error_occurred.emit(
+                f"Text too long ({len(chunks)} sentences). "
+                f"Reading the first {MAX_SENTENCE_QUEUE}."
+            )
+            chunks = chunks[:MAX_SENTENCE_QUEUE]
+
+        # ── Producer: renders WAVs and puts paths into the queue ──────────────
+        def _producer():
+            lock = self._pyttsx3_lock
+            if lock:
+                lock.acquire()
+            try:
+                engine = pyttsx3.init()
                 try:
                     engine.setProperty("rate",   self._rate)
                     engine.setProperty("volume", 1.0)
@@ -513,26 +535,24 @@ class Pyttsx3Worker(QThread):
                 except Exception:
                     pass
 
-                chunks = _split_sentences(self._text)
-                if len(chunks) > MAX_SENTENCE_QUEUE:
-                    self.error_occurred.emit(
-                        f"Text too long ({len(chunks)} sentences). "
-                        f"Reading the first {MAX_SENTENCE_QUEUE}."
-                    )
-                    chunks = chunks[:MAX_SENTENCE_QUEUE]
-
                 for sentence in chunks:
                     sentence = sentence.strip()
-                    if not sentence:
-                        continue
+                    if not sentence or self._stop_flag.is_set():
+                        break
                     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                     tmp.close()
                     try:
                         engine.save_to_file(sentence, tmp.name)
                         engine.runAndWait()
-                        tmp_files.append(tmp.name)
+                        if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 64:
+                            wav_queue.put(tmp.name)   # signal player: ready
+                        else:
+                            try:
+                                os.remove(tmp.name)
+                            except Exception:
+                                pass
                     except Exception as exc:
-                        self.error_occurred.emit(f"TTS render error: {exc}")
+                        render_error.append(str(exc))
                         try:
                             os.remove(tmp.name)
                         except Exception:
@@ -543,31 +563,44 @@ class Pyttsx3Worker(QThread):
                     del engine
                 except Exception:
                     pass
-                finally:
-                    if lock:
-                        lock.release()
+            except Exception as exc:
+                render_error.append(f"Failed to init TTS: {exc}")
+            finally:
+                if lock:
+                    lock.release()
+                wav_queue.put(None)   # sentinel: producer is done
 
-                # Store in cache so restart can replay instantly
-                if tmp_files and self._engine_ref is not None:
-                    try:
-                        self._engine_ref.store_wav_cache(self._text, tmp_files)
-                        owns_files = False   # cache now owns the files
-                    except Exception:
-                        # store failed — we still own the files, delete them below
-                        owns_files = True
+        producer_thread = threading.Thread(target=_producer, daemon=True,
+                                           name="pyttsx3-producer")
+        producer_thread.start()
 
-            if not tmp_files or self._stop_flag.is_set():
-                return
+        # ── Consumer: plays WAVs as they arrive from the queue ────────────────
+        started = False
+        owns_files = True
 
-            # ── Playback phase: pygame plays each WAV ─────────────────────────
-            self.started_speaking.emit()
+        try:
+            while True:
+                try:
+                    wav_path = wav_queue.get(timeout=0.05)
+                except Exception:
+                    # Timeout — check stop flag while waiting for next WAV
+                    if self._stop_flag.is_set():
+                        break
+                    continue
 
-            for wav_path in tmp_files:
+                if wav_path is None:
+                    # Sentinel — producer finished
+                    break
+
+                all_rendered_files.append(wav_path)
+
                 if self._stop_flag.is_set():
                     break
 
-                if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 64:
-                    continue
+                # Emit started_speaking on first WAV — user hears audio immediately
+                if not started:
+                    self.started_speaking.emit()
+                    started = True
 
                 try:
                     pygame.mixer.music.load(wav_path)
@@ -581,7 +614,6 @@ class Pyttsx3Worker(QThread):
                     if self._stop_flag.is_set():
                         pygame.mixer.music.stop()
                         break
-
                     if self._pause_flag.is_set():
                         pygame.mixer.music.pause()
                         self.paused_speaking.emit()
@@ -595,7 +627,87 @@ class Pyttsx3Worker(QThread):
                             self.resumed_speaking.emit()
                         if self._stop_flag.is_set():
                             break
+                    self.msleep(40)
 
+                try:
+                    pygame.mixer.music.unload()
+                except Exception:
+                    pass
+
+                if self._stop_flag.is_set():
+                    break
+
+        except Exception as exc:
+            if not self._stop_flag.is_set():
+                self.error_occurred.emit(f"Unexpected TTS error: {exc}")
+        finally:
+            # Wait for producer to finish so we don't delete files it's still writing
+            producer_thread.join(timeout=2.0)
+
+            try:
+                pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
+            except Exception:
+                pass
+
+            if render_error and not self._stop_flag.is_set():
+                self.error_occurred.emit(f"TTS render error: {render_error[0]}")
+
+            # Store in cache for instant replay on restart
+            if all_rendered_files and self._engine_ref is not None and not self._stop_flag.is_set():
+                try:
+                    self._engine_ref.store_wav_cache(self._text, all_rendered_files)
+                    owns_files = False
+                except Exception:
+                    owns_files = True
+
+            # Delete files we own (not cached)
+            if owns_files:
+                for f in all_rendered_files:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except Exception:
+                        pass
+
+            self.finished_speaking.emit()
+
+    def _play_wav_list(self, wav_files: list[str], owns_files: bool = True):
+        """Play a pre-rendered list of WAV files via pygame (cache replay path)."""
+        try:
+            self.preparing_speech.emit()
+            self.started_speaking.emit()
+
+            for wav_path in wav_files:
+                if self._stop_flag.is_set():
+                    break
+                if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 64:
+                    continue
+                try:
+                    pygame.mixer.music.load(wav_path)
+                    pygame.mixer.music.set_volume(self._volume)
+                    pygame.mixer.music.play()
+                except Exception as exc:
+                    self.error_occurred.emit(f"Audio playback error: {exc}")
+                    continue
+
+                while pygame.mixer.music.get_busy():
+                    if self._stop_flag.is_set():
+                        pygame.mixer.music.stop()
+                        break
+                    if self._pause_flag.is_set():
+                        pygame.mixer.music.pause()
+                        self.paused_speaking.emit()
+                        while self._pause_flag.is_set():
+                            if self._stop_flag.is_set():
+                                pygame.mixer.music.stop()
+                                break
+                            self.msleep(40)
+                        else:
+                            pygame.mixer.music.unpause()
+                            self.resumed_speaking.emit()
+                        if self._stop_flag.is_set():
+                            break
                     self.msleep(40)
 
                 try:
@@ -615,9 +727,8 @@ class Pyttsx3Worker(QThread):
                 pygame.mixer.music.unload()
             except Exception:
                 pass
-            # Only delete files we own (not cached files managed by TTSEngine)
             if owns_files:
-                for f in tmp_files:
+                for f in wav_files:
                     try:
                         if os.path.exists(f):
                             os.remove(f)
@@ -627,86 +738,79 @@ class Pyttsx3Worker(QThread):
 
     def _run_windows_sapi(self):
         """
-        Windows offline TTS — mirrors the Linux path exactly:
-          1. Use SAPI5 SpFileStream to render each sentence to a temp WAV.
-             (pyttsx3 save_to_file() produces empty WAVs on Windows — we use
-              comtypes directly to work around that bug.)
-          2. Play each WAV via pygame.mixer.music — instant stop/pause/resume.
+        Windows offline TTS — pipeline version:
+          Producer: SAPI5 SpFileStream renders each sentence to a temp WAV
+          Consumer: pygame plays each WAV as soon as it's ready
 
-        This gives the same sentence-chunked, instantly-stoppable behaviour
-        as the Linux/macOS pygame path.
+        User hears the first sentence immediately instead of waiting for
+        all sentences to render first.
         """
-        tmp_files: list[str] = []
-        owns_files = True
+        import queue as _queue
 
-        try:
-            # ── Use cached WAVs if available ──────────────────────────────────
-            if self._cached_wavs:
-                tmp_files = list(self._cached_wavs)
-                owns_files = False
-                self.preparing_speech.emit()
-            else:
-                self.preparing_speech.emit()
+        # Use cached WAVs if available (instant replay)
+        if self._cached_wavs:
+            self._play_wav_list(list(self._cached_wavs), owns_files=False)
+            return
 
-                try:
-                    import comtypes.client
-                    import comtypes
+        wav_queue: _queue.Queue = _queue.Queue()
+        all_rendered_files: list[str] = []
+        render_error: list[str] = []
 
-                    voice = comtypes.client.CreateObject("SAPI.SpVoice")
+        self.preparing_speech.emit()
 
-                    # Map pyttsx3 rate (words/min, ~175 default) → SAPI rate (-10..+10)
-                    sapi_rate = max(-10, min(10, int((self._rate - 175) / 25)))
-                    voice.Rate   = sapi_rate
-                    voice.Volume = max(0, min(100, int(self._volume * 100)))
+        chunks = _split_sentences(self._text)
+        if len(chunks) > MAX_SENTENCE_QUEUE:
+            self.error_occurred.emit(
+                f"Text too long ({len(chunks)} sentences). "
+                f"Reading the first {MAX_SENTENCE_QUEUE}."
+            )
+            chunks = chunks[:MAX_SENTENCE_QUEUE]
 
-                    if self._voice_id:
-                        try:
-                            for v in voice.GetVoices():
-                                if v.Id == self._voice_id:
-                                    voice.Voice = v
-                                    break
-                        except Exception:
-                            pass
+        # ── Producer: SAPI5 renders WAVs ──────────────────────────────────────
+        def _producer():
+            try:
+                import comtypes.client
+                import comtypes
 
-                except Exception as exc:
-                    self.error_occurred.emit(f"Failed to initialize SAPI5: {exc}")
-                    self.finished_speaking.emit()
-                    return
+                voice = comtypes.client.CreateObject("SAPI.SpVoice")
+                sapi_rate = max(-10, min(10, int((self._rate - 175) / 25)))
+                voice.Rate   = sapi_rate
+                voice.Volume = max(0, min(100, int(self._volume * 100)))
 
-                chunks = _split_sentences(self._text)
-                if len(chunks) > MAX_SENTENCE_QUEUE:
-                    self.error_occurred.emit(
-                        f"Text too long ({len(chunks)} sentences). "
-                        f"Reading the first {MAX_SENTENCE_QUEUE}."
-                    )
-                    chunks = chunks[:MAX_SENTENCE_QUEUE]
+                if self._voice_id:
+                    try:
+                        for v in voice.GetVoices():
+                            if v.Id == self._voice_id:
+                                voice.Voice = v
+                                break
+                    except Exception:
+                        pass
 
-                # SpFileStream open mode: SSFMCreateForWrite = 3
                 SSFMCreateForWrite = 3
 
                 for sentence in chunks:
                     sentence = sentence.strip()
                     if not sentence or self._stop_flag.is_set():
                         break
-
                     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                     tmp.close()
-
                     try:
                         stream = comtypes.client.CreateObject("SAPI.SpFileStream")
                         stream.Open(tmp.name, SSFMCreateForWrite, False)
                         old_stream = voice.AudioOutputStream
                         voice.AudioOutputStream = stream
-                        # SVSFDefault = 0 (synchronous)
                         voice.Speak(sentence, 0)
                         stream.Close()
                         voice.AudioOutputStream = old_stream
-                        if os.path.getsize(tmp.name) > 64:
-                            tmp_files.append(tmp.name)
+                        if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 64:
+                            wav_queue.put(tmp.name)
                         else:
-                            os.remove(tmp.name)
+                            try:
+                                os.remove(tmp.name)
+                            except Exception:
+                                pass
                     except Exception as exc:
-                        self.error_occurred.emit(f"TTS render error: {exc}")
+                        render_error.append(str(exc))
                         try:
                             os.remove(tmp.name)
                         except Exception:
@@ -717,26 +821,39 @@ class Pyttsx3Worker(QThread):
                 except Exception:
                     pass
 
-                # Cache for instant replay on restart
-                if tmp_files and self._engine_ref is not None:
-                    try:
-                        self._engine_ref.store_wav_cache(self._text, tmp_files)
-                        owns_files = False
-                    except Exception:
-                        owns_files = True
+            except Exception as exc:
+                render_error.append(f"Failed to initialize SAPI5: {exc}")
+            finally:
+                wav_queue.put(None)   # sentinel
 
-            if not tmp_files or self._stop_flag.is_set():
-                return
+        producer_thread = threading.Thread(target=_producer, daemon=True,
+                                           name="sapi5-producer")
+        producer_thread.start()
 
-            # ── Playback phase: pygame plays each WAV (same as Linux) ─────────
-            self.started_speaking.emit()
+        # ── Consumer: plays WAVs as they arrive ───────────────────────────────
+        started = False
+        owns_files = True
 
-            for wav_path in tmp_files:
+        try:
+            while True:
+                try:
+                    wav_path = wav_queue.get(timeout=0.05)
+                except Exception:
+                    if self._stop_flag.is_set():
+                        break
+                    continue
+
+                if wav_path is None:
+                    break
+
+                all_rendered_files.append(wav_path)
+
                 if self._stop_flag.is_set():
                     break
 
-                if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 64:
-                    continue
+                if not started:
+                    self.started_speaking.emit()
+                    started = True
 
                 try:
                     pygame.mixer.music.load(wav_path)
@@ -750,7 +867,6 @@ class Pyttsx3Worker(QThread):
                     if self._stop_flag.is_set():
                         pygame.mixer.music.stop()
                         break
-
                     if self._pause_flag.is_set():
                         pygame.mixer.music.pause()
                         self.paused_speaking.emit()
@@ -764,7 +880,6 @@ class Pyttsx3Worker(QThread):
                             self.resumed_speaking.emit()
                         if self._stop_flag.is_set():
                             break
-
                     self.msleep(40)
 
                 try:
@@ -779,14 +894,32 @@ class Pyttsx3Worker(QThread):
             if not self._stop_flag.is_set():
                 self.error_occurred.emit(f"Unexpected TTS error: {exc}")
         finally:
+            producer_thread.join(timeout=2.0)
             try:
                 pygame.mixer.music.stop()
                 pygame.mixer.music.unload()
             except Exception:
                 pass
+
+            if render_error and not self._stop_flag.is_set():
+                self.error_occurred.emit(f"TTS render error: {render_error[0]}")
+
+            if all_rendered_files and self._engine_ref is not None and not self._stop_flag.is_set():
+                try:
+                    self._engine_ref.store_wav_cache(self._text, all_rendered_files)
+                    owns_files = False
+                except Exception:
+                    owns_files = True
+
             if owns_files:
-                for f in tmp_files:
+                for f in all_rendered_files:
                     try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except Exception:
+                        pass
+
+            self.finished_speaking.emit()
                         if os.path.exists(f):
                             os.remove(f)
                     except Exception:
