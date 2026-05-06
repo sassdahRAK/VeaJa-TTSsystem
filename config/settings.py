@@ -14,7 +14,7 @@ not hardcoded here.
 
 # ── App identity ───────────────────────────────────────────────────────────────
 APP_NAME    = "Veaja"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 # ── Language / TTS ────────────────────────────────────────────────────────────
 DEFAULT_LANGUAGE      = "en"          # ISO 639-1

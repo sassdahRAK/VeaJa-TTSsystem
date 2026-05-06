@@ -1,6 +1,6 @@
 [Setup]
 AppName=Veaja
-AppVersion=1.0.0
+AppVersion=1.1.0
 AppPublisher=Veaja
 AppPublisherURL=https://github.com/sassdahRAK/VeaJa-TTSsystem
 AppSupportURL=https://github.com/sassdahRAK/VeaJa-TTSsystem/issues
@@ -8,7 +8,7 @@ AppUpdatesURL=https://github.com/sassdahRAK/VeaJa-TTSsystem/releases
 DefaultDirName={autopf}\Veaja
 DefaultGroupName=Veaja
 OutputDir=installer_output
-OutputBaseFilename=Veaja_Setup_1.0.0
+OutputBaseFilename=Veaja_Setup_1.1.0
 SetupIconFile=assets\veaja.ico
 UninstallDisplayIcon={app}\Veaja.exe
 Compression=lzma2/ultra64
