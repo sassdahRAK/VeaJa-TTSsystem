@@ -487,28 +487,22 @@ class Pyttsx3Worker(QThread):
 
     def _run_pipeline(self):
         """
-        Producer-consumer pipeline for offline TTS:
+        Producer-consumer pipeline for offline TTS.
 
-          Producer thread  →  renders sentence WAVs via pyttsx3
-          Main worker      →  plays each WAV via pygame as soon as it's ready
+        Renders and plays sentence-by-sentence in the same thread:
+          1. Render sentence N to WAV
+          2. Start playing sentence N via pygame (non-blocking play())
+          3. While pygame plays N, render sentence N+1
+          4. Wait for N to finish, then play N+1
 
-        Timeline (3 sentences):
-          t=0   render s1 starts
-          t=0.3 s1 ready → play s1 + render s2 starts simultaneously
-          t=0.6 s2 ready → play s2 + render s3 starts simultaneously
-          t=0.9 s3 ready → play s3
-
-        vs old approach (render ALL then play):
-          t=0   render s1
-          t=0.3 render s2
-          t=0.6 render s3
-          t=0.9 play s1, s2, s3  ← user waits 0.9s before hearing anything
+        This gives the same latency benefit as a separate producer thread
+        but without the espeak thread-safety issue (segfault).
         """
         import queue as _queue
 
-        wav_queue: _queue.Queue = _queue.Queue()
-        all_rendered_files: list[str] = []   # for cache storage after done
+        all_rendered_files: list[str] = []
         render_error: list[str] = []
+        owns_files = True
 
         self.preparing_speech.emit()
 
@@ -520,88 +514,66 @@ class Pyttsx3Worker(QThread):
             )
             chunks = chunks[:MAX_SENTENCE_QUEUE]
 
-        # ── Producer: renders WAVs and puts paths into the queue ──────────────
-        def _producer():
-            lock = self._pyttsx3_lock
-            if lock:
-                lock.acquire()
+        # Acquire pyttsx3 lock for the entire render session
+        lock = self._pyttsx3_lock
+        if lock:
+            lock.acquire()
+
+        engine = None
+        try:
             try:
                 engine = pyttsx3.init()
-                try:
-                    engine.setProperty("rate",   self._rate)
-                    engine.setProperty("volume", 1.0)
-                    if self._voice_id:
-                        engine.setProperty("voice", self._voice_id)
-                except Exception:
-                    pass
+                engine.setProperty("rate",   self._rate)
+                engine.setProperty("volume", 1.0)
+                if self._voice_id:
+                    engine.setProperty("voice", self._voice_id)
+            except Exception as exc:
+                self.error_occurred.emit(
+                    f"Failed to initialize TTS engine: {exc}\n"
+                    "On Linux, install espeak: sudo apt install espeak espeak-ng"
+                )
+                return
 
-                for sentence in chunks:
-                    sentence = sentence.strip()
-                    if not sentence or self._stop_flag.is_set():
-                        break
-                    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-                    tmp.close()
-                    try:
-                        engine.save_to_file(sentence, tmp.name)
-                        engine.runAndWait()
-                        if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 64:
-                            wav_queue.put(tmp.name)   # signal player: ready
-                        else:
-                            try:
-                                os.remove(tmp.name)
-                            except Exception:
-                                pass
-                    except Exception as exc:
-                        render_error.append(str(exc))
+            started = False
+
+            for i, sentence in enumerate(chunks):
+                sentence = sentence.strip()
+                if not sentence or self._stop_flag.is_set():
+                    break
+
+                # ── Render this sentence to WAV ───────────────────────────────
+                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                tmp.close()
+                rendered = False
+                try:
+                    engine.save_to_file(sentence, tmp.name)
+                    engine.runAndWait()
+                    if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 64:
+                        all_rendered_files.append(tmp.name)
+                        rendered = True
+                    else:
                         try:
                             os.remove(tmp.name)
                         except Exception:
                             pass
+                except Exception as exc:
+                    render_error.append(str(exc))
+                    try:
+                        os.remove(tmp.name)
+                    except Exception:
+                        pass
 
-                try:
-                    engine.stop()
-                    del engine
-                except Exception:
-                    pass
-            except Exception as exc:
-                render_error.append(f"Failed to init TTS: {exc}")
-            finally:
-                if lock:
-                    lock.release()
-                wav_queue.put(None)   # sentinel: producer is done
-
-        producer_thread = threading.Thread(target=_producer, daemon=True,
-                                           name="pyttsx3-producer")
-        producer_thread.start()
-
-        # ── Consumer: plays WAVs as they arrive from the queue ────────────────
-        started = False
-        owns_files = True
-
-        try:
-            while True:
-                try:
-                    wav_path = wav_queue.get(timeout=0.05)
-                except Exception:
-                    # Timeout — check stop flag while waiting for next WAV
-                    if self._stop_flag.is_set():
-                        break
+                if not rendered or self._stop_flag.is_set():
                     continue
 
-                if wav_path is None:
-                    # Sentinel — producer finished
-                    break
+                wav_path = all_rendered_files[-1]
 
-                all_rendered_files.append(wav_path)
-
-                if self._stop_flag.is_set():
-                    break
-
-                # Emit started_speaking on first WAV — user hears audio immediately
+                # ── Emit started on first sentence ────────────────────────────
                 if not started:
                     self.started_speaking.emit()
                     started = True
 
+                # ── Play this sentence via pygame ─────────────────────────────
                 try:
                     pygame.mixer.music.load(wav_path)
                     pygame.mixer.music.set_volume(self._volume)
@@ -610,6 +582,7 @@ class Pyttsx3Worker(QThread):
                     self.error_occurred.emit(f"Audio playback error: {exc}")
                     continue
 
+                # Poll while playing — check stop/pause every 40ms
                 while pygame.mixer.music.get_busy():
                     if self._stop_flag.is_set():
                         pygame.mixer.music.stop()
@@ -641,8 +614,14 @@ class Pyttsx3Worker(QThread):
             if not self._stop_flag.is_set():
                 self.error_occurred.emit(f"Unexpected TTS error: {exc}")
         finally:
-            # Wait for producer to finish so we don't delete files it's still writing
-            producer_thread.join(timeout=2.0)
+            try:
+                if engine is not None:
+                    engine.stop()
+                    del engine
+            except Exception:
+                pass
+            if lock:
+                lock.release()
 
             try:
                 pygame.mixer.music.stop()
@@ -661,7 +640,6 @@ class Pyttsx3Worker(QThread):
                 except Exception:
                     owns_files = True
 
-            # Delete files we own (not cached)
             if owns_files:
                 for f in all_rendered_files:
                     try:
