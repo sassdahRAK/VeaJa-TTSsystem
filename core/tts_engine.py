@@ -920,11 +920,6 @@ class Pyttsx3Worker(QThread):
                         pass
 
             self.finished_speaking.emit()
-                        if os.path.exists(f):
-                            os.remove(f)
-                    except Exception:
-                        pass
-            self.finished_speaking.emit()
 
     # ── Pause / resume — NOW SUPPORTED via pygame ─────────────────────────────
 
