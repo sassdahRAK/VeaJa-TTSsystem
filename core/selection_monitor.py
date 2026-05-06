@@ -179,15 +179,17 @@ class SelectionMonitor(QObject):
         """
         Received on the Qt main thread from the pynput bridge signal.
 
-        Large text selections (multiple paragraphs) take longer for the OS
-        to write to the clipboard. We use a two-stage check:
-          1. After 150ms  — catches most normal copies
-          2. After 400ms  — catches large selections that took longer to write
+        Timing strategy per platform:
+        - Linux:   150ms + 400ms  (PRIMARY selection handles partial-copy bug)
+        - Windows: 150ms + 400ms + 800ms  (some apps use delayed clipboard rendering)
+        - macOS:   150ms + 400ms  (clipboard is synchronous, fast)
 
-        The second check is a no-op if the text didn't change.
+        The later checks are no-ops if the text didn't change.
         """
-        QTimer.singleShot(150, self._force_check)    # fast check
-        QTimer.singleShot(400, self._force_check)    # safety net for large selections
+        QTimer.singleShot(150, self._force_check)    # fast check — all platforms
+        QTimer.singleShot(400, self._force_check)    # safety net — all platforms
+        if platform.system() == "Windows":
+            QTimer.singleShot(800, self._force_check)  # delayed rendering — Windows only
 
     @pyqtSlot()
     def _on_read_hotkey_fired(self):
