@@ -49,9 +49,9 @@ packaging==26.1
 comtypes==1.4.8; sys_platform == "win32"
 
 # ── macOS only ────────────────────────────────────────────────────────────────
-# pyobjc is required on macOS for the overlay window-level management.
-# It replaces the previous ctypes/libobjc approach which caused SIGBUS/SIGSEGV
-# on Apple Silicon (ARM64) due to ARM64 ABI incompatibility with ctypes.
+# pyobjc is required on macOS for the overlay window-level management and
+# Now Playing / Media Remote integration (media keys, AirPods, lock screen).
 # pyobjc is pre-installed on macOS system Python; this ensures it is present
 # in virtualenvs too.
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyobjc-framework-MediaPlayer>=10.0; sys_platform == "darwin"

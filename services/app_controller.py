@@ -37,6 +37,7 @@ from core.audio_history     import AudioHistory
 from core.profile           import ProfileManager
 from core.language          import filter_for_tts, language_display_name
 from core.network_monitor   import NetworkMonitor
+from core.now_playing       import get_instance as _get_now_playing
 from gui.main_window        import MainWindow, ReadState
 from gui.overlay_widget     import OverlayWidget
 from gui.tray_icon          import TrayIcon
@@ -81,6 +82,9 @@ class AppController(QObject):
 
         # NetworkMonitor polls internet connectivity every 10 s in a background thread
         self._net_monitor = NetworkMonitor(parent=self, interval_ms=10_000)
+
+        # macOS Now Playing — singleton, safe no-op on Windows/Linux
+        self._now_playing = _get_now_playing()
 
         self._wire_signals()
         self._populate_voices()
@@ -145,6 +149,13 @@ class AppController(QObject):
         # System tray → always show main window via WindowManager
         self._tray.show_window_requested.connect(self._wm.show_main)
         self._tray.quit_requested.connect(self._quit)
+
+        # ── macOS Now Playing remote commands ─────────────────────────────────
+        # Media keys, AirPods, lock screen controls → TTS actions
+        self._now_playing.play_requested.connect(self._resume_speaking)
+        self._now_playing.pause_requested.connect(self._pause_speaking)
+        self._now_playing.stop_requested.connect(self._stop_speaking)
+        self._now_playing.toggle_requested.connect(self._on_overlay_stop)
 
     def _populate_voices(self) -> None:
         """Fetch available voices from the TTS engine and push them to the UI."""
@@ -454,18 +465,22 @@ class AppController(QObject):
             self._overlay.show_overlay()
         # Refresh watchdog — now in SPEAKING state
         self._reset_watchdog(None)   # cancel processing watchdog
+        # Register with macOS Now Playing widget
+        self._now_playing.update(self._current_text)
 
     def _on_speaking_paused(self) -> None:
         """Audio playback has been paused."""
         self._overlay.set_speaking(False)
         self._overlay.set_paused(True)
         self._main_window.set_read_state(ReadState.PAUSED)
+        self._now_playing.set_paused(True)
 
     def _on_speaking_resumed(self) -> None:
         """Audio playback has resumed from pause."""
         self._overlay.set_paused(False)
         self._overlay.set_speaking(True)
         self._main_window.set_read_state(ReadState.SPEAKING)
+        self._now_playing.set_paused(False)
 
     def _on_speaking_finished(self) -> None:
         """Audio playback has ended (naturally or was stopped)."""
@@ -480,6 +495,7 @@ class AppController(QObject):
         self._main_window.mark_reading_started("")
         if self._main_window.isVisible() and self._overlay.isVisible():
             self._overlay.hide_overlay()
+        self._now_playing.clear()
 
     def _reset_watchdog(self, ms: int | None) -> None:
         """
@@ -681,6 +697,7 @@ class AppController(QObject):
         except Exception:
             pass
 
+        self._now_playing.clear()   # remove from macOS Now Playing widget
         self._tray.hide()
         QApplication.quit()
 
