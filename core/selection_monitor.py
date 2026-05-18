@@ -108,7 +108,45 @@ class SelectionMonitor(QObject):
     # pynput fallback — runs on pynput thread, must not touch Qt directly
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _is_accessibility_trusted() -> bool:
+        """
+        macOS only — returns True if Accessibility permission is granted.
+
+        Calling pynput.keyboard.GlobalHotKeys when the permission is NOT
+        granted causes a C-level segfault (SIGSEGV) that bypasses Python's
+        try/except entirely.  Checking AXIsProcessTrusted() first lets us
+        skip pynput safely and fall back to the Qt clipboard watcher.
+        """
+        if platform.system() != "Darwin":
+            return True
+        try:
+            import ctypes
+            appsvcs = ctypes.cdll.LoadLibrary(
+                "/System/Library/Frameworks/ApplicationServices.framework"
+                "/ApplicationServices"
+            )
+            appsvcs.AXIsProcessTrusted.restype = ctypes.c_bool
+            return bool(appsvcs.AXIsProcessTrusted())
+        except Exception:
+            return True   # can't check — assume trusted, let pynput handle it
+
     def _start_pynput(self):
+        # macOS: check Accessibility permission BEFORE starting pynput.
+        # If not trusted, pynput's CGEventTapCreate returns NULL and some
+        # versions dereference it → SIGSEGV that kills the process.
+        # The Qt clipboard watcher (dataChanged) is still active as fallback.
+        if platform.system() == "Darwin" and not self._is_accessibility_trusted():
+            print(
+                "[Veaja] Warning: Accessibility permission not granted.\n"
+                "         Global hotkeys (Cmd+C / Cmd+R) are disabled.\n"
+                "         Qt clipboard watcher is still active.\n"
+                "         To enable hotkeys: System Settings → Privacy & Security\n"
+                "         → Accessibility → add Terminal (or your app).",
+                file=sys.stderr,
+            )
+            return
+
         try:
             from pynput import keyboard
 

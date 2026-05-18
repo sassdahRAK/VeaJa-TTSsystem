@@ -27,7 +27,7 @@ Component graph
 
 import platform
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore    import QObject, QTimer
 
 from config.settings        import MAX_INPUT_CHARS
@@ -194,7 +194,7 @@ class AppController(QObject):
         # Clear all guards first so the new speak() call is never blocked.
         self._action_pending = False
         if self._tts.is_speaking() or self._tts.is_paused():
-            self._tts._stopping = False   # allow immediate new start
+            self._tts.reset_stopping()   # allow immediate new start
             self._tts.stop()
             self._on_speaking_finished()   # reset UI to IDLE immediately
 
@@ -226,7 +226,7 @@ class AppController(QObject):
 
         # Clear guards so this fresh read is never silently dropped
         self._action_pending = False
-        self._tts._stopping = False
+        self._tts.reset_stopping()
 
         self._main_window.set_text(text)
         self._overlay.set_text(text, auto_show=False)
@@ -497,7 +497,7 @@ class AppController(QObject):
 
     def _on_watchdog_fired(self) -> None:
         """Force-reset the UI if TTS got stuck without emitting finished_speaking."""
-        self._tts._stopping = False
+        self._tts.reset_stopping()
         self._tts.stop()
         self._on_speaking_finished()
 

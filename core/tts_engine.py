@@ -1190,6 +1190,14 @@ class TTSEngine:
     def _clear_stopping(self):
         self._stopping = False
 
+    def reset_stopping(self) -> None:
+        """
+        Public method to clear the _stopping guard from outside the engine.
+        Use this instead of accessing _stopping directly — prevents races
+        where a new speak() call is blocked by a stale stopping state.
+        """
+        self._stopping = False
+
     def pause(self):
         if self._worker and self._worker.isRunning():
             self._worker.pause()

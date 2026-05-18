@@ -135,7 +135,14 @@ def _configure_app(app: QApplication) -> None:
 
     system = platform.system()
     if system == "Darwin":
-        app.setFont(QFont("SF Pro Text", 13))
+        # Use Qt's default system font on macOS — avoids the "-apple-system"
+        # alias warning that Qt 6.x emits when resolving font family names.
+        # Setting point size only (no family) lets Qt pick the correct
+        # San Francisco / Helvetica Neue system font automatically.
+        from PyQt6.QtGui import QFontDatabase
+        sys_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+        sys_font.setPointSize(13)
+        app.setFont(sys_font)
         app.setQuitOnLastWindowClosed(False)
     elif system == "Windows":
         app.setFont(QFont("Segoe UI", 10))

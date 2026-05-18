@@ -32,57 +32,45 @@ from PyQt6.QtSvg import QSvgRenderer
 # macOS: force overlay above ALL other app windows
 # ══════════════════════════════════════════════════════════════════════════════
 
+# NOTE: The previous ctypes/libobjc approach caused a SIGBUS / SIGSEGV on
+# Apple Silicon (ARM64) because mutating objc_msgSend.argtypes on a shared
+# cdll object is not safe — ctypes caches the function pointer globally and
+# changing argtypes between calls corrupts the ABI.  CFUNCTYPE wrappers also
+# fail because objc_msgSend on ARM64 uses a variadic calling convention that
+# ctypes cannot model correctly.
+#
+# FIX: use PyObjC (already installed on macOS as a system framework) to call
+# NSWindow methods directly via the proper Objective-C bridge.  PyObjC handles
+# the ARM64 ABI correctly and is the Apple-recommended way to call AppKit from
+# Python.
+
 def _mac_float_above_all(widget: QWidget):
     """
-    Push the overlay above every other app window on macOS, regardless of
-    which app is currently active.
+    Push the overlay above every other app window on macOS using PyObjC.
 
-    Key changes vs. previous version:
-      • Level 101 (NSPopUpMenuWindowLevel) — same tier as dropdown menus,
-        reliably above all normal app windows even when they are active.
-        Level 25 (NSStatusWindowLevel) was NOT high enough; active apps
-        could still cover the overlay.
-      • orderFrontRegardless — called immediately (no timer delay) so the
-        window is front BEFORE the calling app finishes becoming active.
+      • Level 101 (NSPopUpMenuWindowLevel) — above all normal app windows.
+      • CanJoinAllSpaces (1) | FullScreenAuxiliary (256) — all Spaces + fullscreen.
+      • orderFrontRegardless — bring to front immediately.
     """
     if platform.system() != "Darwin":
         return
     try:
-        objc = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.A.dylib")
-        objc.objc_msgSend.restype = ctypes.c_void_p
+        import objc
+        # Get the NSWindow for this Qt widget via its native window handle (winId)
+        ns_view_ptr = int(widget.winId())
+        ns_view = objc.objc_object(c_void_p=ns_view_ptr)
+        ns_window = ns_view.window()
+        if ns_window is None:
+            return   # native window not ready yet — showEvent will retry
 
-        ns_view = ctypes.c_void_p(int(widget.winId()))
+        # NSPopUpMenuWindowLevel = 101 — reliably above all normal app windows
+        ns_window.setLevel_(101)
 
-        # step 0: get NSWindow from NSView
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        sel_window = ctypes.c_void_p(objc.sel_registerName(b"window"))
-        ns_window = ctypes.c_void_p(objc.objc_msgSend(ns_view, sel_window))
-        if not ns_window.value:
-            return  # native window not ready yet — showEvent will retry
+        # CanJoinAllSpaces = 1, FullScreenAuxiliary = 256
+        ns_window.setCollectionBehavior_(1 | 256)
 
-        # step 1: setLevel: 101 (NSPopUpMenuWindowLevel)
-        # This is the critical fix — 25 (NSStatusWindowLevel) loses to
-        # active app windows. 101 stays above them reliably.
-        sel_setLevel = ctypes.c_void_p(objc.sel_registerName(b"setLevel:"))
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long]
-        objc.objc_msgSend(ns_window, sel_setLevel, 101)
-
-        # step 2: setCollectionBehavior
-        # CanJoinAllSpaces    = 1   — visible on every desktop Space
-        # FullScreenAuxiliary = 256 — floats above full-screen apps too
-        sel_setCB = ctypes.c_void_p(
-            objc.sel_registerName(b"setCollectionBehavior:")
-        )
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
-        objc.objc_msgSend(ns_window, sel_setCB, 1 | 256)
-
-        # step 3: orderFrontRegardless — move to front NOW, even if
-        # Veaja is not the active application.
-        sel_front = ctypes.c_void_p(
-            objc.sel_registerName(b"orderFrontRegardless")
-        )
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        objc.objc_msgSend(ns_window, sel_front)
+        # Bring to front immediately, even when Veaja is not the active app
+        ns_window.orderFrontRegardless()
 
     except Exception as exc:
         print(f"[Veaja] Mac window-level warning: {exc}")

@@ -62,21 +62,33 @@ class TrayIcon(QObject):
 
     def __init__(self, dark_mode: bool = False, parent=None):
         super().__init__(parent)
+        self._dark_mode = dark_mode
 
         self._tray = QSystemTrayIcon(parent)
         self._tray.setIcon(_make_tray_icon(dark_mode))
         self._tray.setToolTip("Veaja — running")
 
-        self._build_menu()
+        self._build_menu(dark_mode)
         self._tray.activated.connect(self._on_activated)
         self._tray.show()
 
-    def _build_menu(self):
+    def _build_menu(self, dark: bool = True):
         menu = QMenu()
-        menu.setStyleSheet(
-            "QMenu { background:#2C2C2E; color:#F5F5F7; border-radius:8px; }"
-            "QMenu::item:selected { background:#3A3A3C; }"
-        )
+        if dark:
+            menu.setStyleSheet(
+                "QMenu { background:#2C2C2E; color:#F5F5F7; border-radius:8px; padding:4px; }"
+                "QMenu::item { padding:8px 20px; border-radius:4px; }"
+                "QMenu::item:selected { background:#3A3A3C; }"
+                "QMenu::separator { height:1px; background:#444; margin:4px 8px; }"
+            )
+        else:
+            menu.setStyleSheet(
+                "QMenu { background:#FFFFFF; color:#1C1C1E; border:1px solid #DDD; "
+                "border-radius:8px; padding:4px; }"
+                "QMenu::item { padding:8px 20px; border-radius:4px; }"
+                "QMenu::item:selected { background:#F0F0F0; }"
+                "QMenu::separator { height:1px; background:#DDD; margin:4px 8px; }"
+            )
 
         act_show = QAction("Show Veaja", self._tray)
         act_show.triggered.connect(self.show_window_requested)
@@ -98,7 +110,9 @@ class TrayIcon(QObject):
             self.show_window_requested.emit()
 
     def update_icon(self, dark_mode: bool):
+        self._dark_mode = dark_mode
         self._tray.setIcon(_make_tray_icon(dark_mode))
+        self._build_menu(dark_mode)   # rebuild menu with correct theme colours
 
     def show_notification(self, title: str, message: str):
         if QSystemTrayIcon.isSystemTrayAvailable():
