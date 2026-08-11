@@ -62,7 +62,7 @@ sudo apt install espeak espeak-ng
 
 ---
 
-## Quick Start
+## Quick StarVt
 
 ```bash
 # 1. Clone

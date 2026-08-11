@@ -86,6 +86,12 @@ def _dpi_scale() -> float:
         import platform as _platform
         app = QApplication.instance()
         if app and app.primaryScreen():
+            # macOS: Qt already handles Retina/HiDPI scaling automatically via
+            # devicePixelRatio. Applying an additional logical-DPI multiplier
+            # (which returns ~1.5 on Retina displays) makes everything 1.5×
+            # too large. Return 1.0 so layout sizes are not double-scaled.
+            if _platform.system() == "Darwin":
+                return 1.0
             screen = app.primaryScreen()
             logical  = screen.logicalDotsPerInch()
             physical = screen.physicalDotsPerInch()

@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer, QPoint
 from PyQt6.QtGui import (
     QPalette, QColor, QPixmap, QFont,
-    QPainter, QPainterPath, QTextCursor, QTextCharFormat, QBrush
+    QPainter, QPainterPath, QPen, QTextCursor, QTextCharFormat, QBrush
 )
 from PyQt6.QtCore import QRectF
 
@@ -55,11 +55,19 @@ def _is_dark_mode() -> bool:
     return app.palette().color(QPalette.ColorRole.Window).lightness() < 128
 
 
+# ── macOS traffic light widget ────────────────────────────────────────────────
+
+
 # ── Drag-to-move title bar ────────────────────────────────────────────────────
 
 def _is_linux() -> bool:
     import platform as _platform
     return _platform.system() == "Linux"
+
+
+def _is_mac() -> bool:
+    import platform as _platform
+    return _platform.system() == "Darwin"
 
 
 class _DragBar(QWidget):
@@ -72,11 +80,11 @@ class _DragBar(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if _is_linux():
-                # On Linux (X11 + Wayland) use the native system-move protocol.
-                # startSystemMove() sends _NET_WM_MOVERESIZE on X11 and the
-                # equivalent xdg-shell move request on Wayland, so the window
-                # manager handles the drag — self.move() alone is unreliable.
+            if _is_linux() or _is_mac():
+                # On Linux (X11/Wayland) and macOS use the native system-move
+                # protocol so the window manager handles the drag correctly.
+                # On macOS this avoids coordinate jitter caused by Retina
+                # devicePixelRatio when using manual _drag_pos tracking.
                 handle = self._win.windowHandle()
                 if handle:
                     handle.startSystemMove()
@@ -84,13 +92,13 @@ class _DragBar(QWidget):
             self._drag_pos = event.globalPosition().toPoint() - self._win.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event):
-        if _is_linux():
-            return  # system move is handled by the WM; nothing to do here
+        if _is_linux() or _is_mac():
+            return  # system move is handled by the WM/OS; nothing to do here
         if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
             if self._win.isMaximized():
                 # Snap out of maximized before dragging
                 self._win.showNormal()
-                if self._win._max_btn:
+                if self._win._max_btn and not _is_mac():
                     self._win._max_btn.setText("❐")
                 # Recalculate so the window doesn't jump
                 self._drag_pos = QPoint(self._win.width() // 2, self.height() // 2)
@@ -167,7 +175,12 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self.setWindowTitle("Veaja")
         self.setMinimumSize(scaled(780), scaled(580))
         self.resize(scaled(900), scaled(660))
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        if _is_mac():
+            # macOS: use the native window frame — Qt provides the traffic
+            # lights (close/minimize/zoom) automatically. No custom title bar.
+            pass
+        else:
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self._title_bar_height = 38   # fixed px — never scales with DPI or window size
         self._title_bar_widget: QWidget | None = None
         self._title_bar_label: QLabel | None = None
@@ -187,9 +200,10 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Custom title bar
-        self._title_bar_widget = self._build_title_bar()
-        root.addWidget(self._title_bar_widget)
+        # Custom title bar (Windows / Linux only — macOS uses native frame)
+        if not _is_mac():
+            self._title_bar_widget = self._build_title_bar()
+            root.addWidget(self._title_bar_widget)
 
         # Content row: sidebar + pages — use QSplitter so the divider is draggable
         self._sidebar_widget = self._build_sidebar()
@@ -215,9 +229,11 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         self._splitter.addWidget(self._sidebar_widget)
         self._splitter.addWidget(self._content_stack)
         # Sidebar: fixed initial width; content area takes all remaining space
-        self._splitter.setSizes([scaled(240), 9999])
-        # Sidebar minimum 160 px, maximum 400 px; content minimum 400 px
-        self._sidebar_widget.setMinimumWidth(scaled(160))
+        self._splitter.setSizes([scaled(self._SIDEBAR_DEFAULT_PX), 9999])
+        # minWidth = default - 1px: the splitter wall sits 1px below default.
+        # The moment user drags even 1px left of default, _on_splitter_moved
+        # detects sb_w < _SIDEBAR_DEFAULT_PX and snaps the sidebar fully closed.
+        self._sidebar_widget.setMinimumWidth(scaled(self._SIDEBAR_DEFAULT_PX - 1))
         self._sidebar_widget.setMaximumWidth(scaled(400))
         self._content_stack.setMinimumWidth(scaled(400))
         # Style the splitter handle to look like the existing divider line
@@ -234,8 +250,8 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
             }
         """)
 
-        # Resize logo whenever the sidebar width changes
-        self._splitter.splitterMoved.connect(lambda pos, idx: self._resize_sidebar_logo())
+        # Resize logo + auto-collapse whenever the sidebar width changes
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
 
         root.addWidget(self._splitter, 1)
 
@@ -244,10 +260,27 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         grip.setFixedSize(14, 14)
         grip.move(self.width() - 14, self.height() - 14)
 
+        # ── macOS floating hamburger (no custom title bar on mac) ─────────
+        # A small button that floats over the top-left of the content area.
+        # Hidden while sidebar is open, shown when sidebar is collapsed.
+        self._float_hamburger: QPushButton | None = None
+        if _is_mac():
+            self._float_hamburger = QPushButton("☰")
+            self._float_hamburger.setObjectName("floatHamburgerBtn")
+            self._float_hamburger.setParent(self)          # overlay on main window
+            self._float_hamburger.setFixedSize(32, 28)
+            self._float_hamburger.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._float_hamburger.setToolTip("Show sidebar")
+            self._float_hamburger.clicked.connect(self._toggle_sidebar)
+            self._float_hamburger.hide()                   # hidden while sidebar open
+            self._float_hamburger.raise_()
+
         # Sidebar is open by default
         self._sidebar_open = True
+        self._sidebar_just_opened = False   # guard against immediate re-collapse
 
     def _build_title_bar(self) -> QWidget:
+        # Only called on Windows / Linux — macOS uses the native window frame.
         bar = _DragBar(self)
         bar.setObjectName("titleBar")
         bar.setFixedHeight(self._title_bar_height)
@@ -256,7 +289,7 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         lay.setContentsMargins(6, 0, 0, 0)
         lay.setSpacing(0)
 
-        # ── Hamburger button — toggles sidebar ────────────────────────────
+        # Hamburger button
         self._hamburger_btn = QPushButton("☰")
         self._hamburger_btn.setObjectName("hamburgerBtn")
         self._hamburger_btn.setFixedSize(36, self._title_bar_height)
@@ -309,26 +342,112 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
         return bar
 
     def _toggle_sidebar(self) -> None:
-        """Collapse or expand the sidebar. The hamburger button always stays visible."""
+        """Collapse or expand the sidebar."""
         if self._sidebar_open:
             # Save current width so we can restore it on re-open
             self._sidebar_last_width = self._sidebar_widget.width()
-            # Collapse: set sidebar to 0 width
+            # Allow splitter to reach 0
+            self._sidebar_widget.setMinimumWidth(1)
             self._splitter.setSizes([0, 9999])
             self._sidebar_widget.hide()
             self._sidebar_open = False
+            # macOS: show floating hamburger so user can restore the sidebar
+            if self._float_hamburger is not None:
+                self._position_float_hamburger()
+                self._float_hamburger.show()
+                self._float_hamburger.raise_()
         else:
-            # Restore to last known width (or default 240)
-            restore = getattr(self, "_sidebar_last_width", scaled(240))
-            restore = max(restore, scaled(160))
+            # Open at default + a  — gives extra breathing room vs the collapse point
+            restore = scaled(self._SIDEBAR_OPEN_PX)
+            # Restore minWidth to default-1 so the wall is back in place
+            self._sidebar_widget.setMinimumWidth(scaled(self._SIDEBAR_DEFAULT_PX - 1))
             self._sidebar_widget.show()
             self._splitter.setSizes([restore, 9999])
             self._sidebar_open = True
+            # Reset drag direction tracker so first move after open is clean
+            self._splitter_last_pos = None
+            # Guard: ignore splitter events briefly while layout settles.
+            # Without this, _on_splitter_moved fires immediately after show()
+            # with a stale width < default and instantly re-collapses the sidebar.
+            self._sidebar_just_opened = True
+            QTimer.singleShot(300, self._clear_sidebar_just_opened)
+            # macOS: hide floating hamburger — sidebar is visible again
+            if self._float_hamburger is not None:
+                self._float_hamburger.hide()
             # Resize logo to fit restored width
             QTimer.singleShot(0, self._resize_sidebar_logo)
 
+    def _clear_sidebar_just_opened(self):
+        self._sidebar_just_opened = False
+
+    # Default sidebar width in logical px
+    _SIDEBAR_DEFAULT_PX = 200
+    # Width used when opening via hamburger = default + a little extra breathing room
+    _SIDEBAR_OPEN_PX    = 220
+
+    def _on_splitter_moved(self, pos: int, idx: int) -> None:
+        """
+        Called every time the splitter handle moves.
+        - Keeps the sidebar logo scaled to current width.
+        - Snaps closed only when the user drags LEFT past the default width.
+          Dragging right (widening) never triggers a collapse.
+        """
+        self._resize_sidebar_logo()
+
+        if not self._sidebar_open:
+            return  # already collapsed — nothing to do
+
+        if getattr(self, "_sidebar_just_opened", False):
+            return  # ignore events while layout settles after reopen
+
+        sb_w = self._sidebar_widget.width()
+
+        # Track previous position to detect drag direction.
+        # Only collapse when dragging LEFT (pos smaller than last recorded).
+        prev_pos = getattr(self, "_splitter_last_pos", None)
+        self._splitter_last_pos = pos
+
+        # If no previous position yet, can't determine direction — skip check
+        if prev_pos is None:
+            return
+
+        dragging_left = pos < prev_pos
+
+        if dragging_left and sb_w < scaled(self._SIDEBAR_DEFAULT_PX):
+            # User actively dragged left past the default — snap fully closed
+            self._sidebar_widget.setMinimumWidth(1)    # allow splitter to reach 0
+            self._splitter.setSizes([0, 9999])
+            self._sidebar_widget.hide()
+            self._sidebar_open = False
+            self._splitter_last_pos = 0
+            # macOS: reveal floating hamburger
+            if self._float_hamburger is not None:
+                self._position_float_hamburger()
+                self._float_hamburger.show()
+                self._float_hamburger.raise_()
+
+    def _position_float_hamburger(self) -> None:
+        """
+        Place the floating hamburger so its vertical center matches
+        the vertical center of the 'Overlay' tab button exactly.
+        """
+        if self._float_hamburger is None:
+            return
+
+        y = 8   # fallback
+        try:
+            overlay_btn = self._tab_bar_widget._buttons[0]
+            btn_top  = overlay_btn.mapTo(self, QPoint(0, 0)).y()
+            btn_h    = overlay_btn.height()
+            ham_h    = self._float_hamburger.height()
+            y = btn_top + (btn_h - ham_h) // 2
+        except Exception:
+            pass
+
+        self._float_hamburger.move(8, y)
+
     def _reload_titlebar_icon(self):
-        if not hasattr(self, "_titlebar_icon"):
+        if not hasattr(self, "_titlebar_icon") or self._titlebar_icon is None:
             return
         from PyQt6.QtWidgets import QApplication as _QApp
         _app = _QApp.instance()
@@ -362,10 +481,12 @@ class MainWindow(DashboardMixin, SettingsMixin, OverlaySettingsMixin,
     def _toggle_maximize(self):
         if self.isMaximized():
             self.showNormal()
-            self._max_btn.setText("❐")
+            if not _is_mac():
+                self._max_btn.setText("❐")
         else:
             self.showMaximized()
-            self._max_btn.setText("❒")
+            if not _is_mac():
+                self._max_btn.setText("❒")
 
 
     # ── Sidebar ────────────────────────────────────────────────────────────────

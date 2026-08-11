@@ -89,6 +89,11 @@ def _overlay_scale() -> float:
         from PyQt6.QtWidgets import QApplication as _QA
         app = _QA.instance()
         if app and app.primaryScreen():
+            # macOS: Qt handles Retina scaling via devicePixelRatio already.
+            # Applying logicalDPI/96 (~1.5 on Retina) makes the pill 1.5× too
+            # large because the DPI compensation is applied twice.
+            if _p.system() == "Darwin":
+                return 1.0
             s = app.primaryScreen()
             logical  = s.logicalDotsPerInch()  / 96.0
             physical = s.physicalDotsPerInch() / 96.0
@@ -820,6 +825,9 @@ class OverlayWidget(QWidget):
     def _is_linux(self) -> bool:
         return platform.system() == "Linux"
 
+    def _is_mac(self) -> bool:
+        return platform.system() == "Darwin"
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._press_pos = event.globalPosition().toPoint()
@@ -828,9 +836,9 @@ class OverlayWidget(QWidget):
             self._drag_offset = self._press_pos - self.pos()
             self._dragging = False
 
-            if self._is_linux() and not self._label_drag_mode:
-                # On Linux delegate to the WM via startSystemMove() once the
-                # user actually starts dragging (handled in mouseMoveEvent).
+            if (self._is_linux() or self._is_mac()) and not self._label_drag_mode:
+                # On Linux and macOS delegate to the WM/OS via startSystemMove()
+                # once the user actually starts dragging (handled in mouseMoveEvent).
                 # We still record press_pos here for click-vs-drag detection.
                 pass
         elif event.button() == Qt.MouseButton.RightButton:
@@ -857,14 +865,16 @@ class OverlayWidget(QWidget):
         if not self._dragging and delta.manhattanLength() > DRAG_PX:
             self._dragging = True
 
-            if self._is_linux():
-                # Delegate to WM now that we know it's a drag, not a click.
+            if self._is_linux() or self._is_mac():
+                # Delegate to WM/OS now that we know it's a drag, not a click.
+                # On macOS this avoids Retina coordinate jitter from manual
+                # _drag_offset tracking.
                 handle = self.windowHandle()
                 if handle:
                     handle.startSystemMove()
                 return
 
-        if self._dragging and not self._is_linux():
+        if self._dragging and not (self._is_linux() or self._is_mac()):
             # Move so the overlay stays under the exact grab point.
             new_pos = event.globalPosition().toPoint() - self._drag_offset
             screen = QApplication.primaryScreen().availableGeometry()

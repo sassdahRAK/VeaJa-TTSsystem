@@ -134,24 +134,42 @@ class ThemeMixin:
 
     def _apply_titlebar_theme(self):
         if not hasattr(self, "_title_bar_widget") or self._title_bar_widget is None:
+            # macOS — no custom title bar. Style the floating hamburger instead.
+            if hasattr(self, "_float_hamburger") and self._float_hamburger is not None:
+                import platform as _platform
+                if _platform.system() == "Darwin":
+                    text_c  = "#ececec" if self._dark else "#111111"
+                    btn_h   = "rgba(255,255,255,0.12)" if self._dark else "rgba(0,0,0,0.08)"
+                    bg      = "#1a1a1a" if self._dark else "#f0f0f0"
+                    self._float_hamburger.setStyleSheet(f"""
+                        QPushButton {{
+                            background: {bg};
+                            color: {text_c};
+                            border: none;
+                            font-size: 15px;
+                            border-radius: 6px;
+                        }}
+                        QPushButton:hover {{ background: {btn_h}; }}
+                        QPushButton:pressed {{ background: {btn_h}; }}
+                    """)
             return
+
+        import platform as _platform
+        is_mac = _platform.system() == "Darwin"
 
         if self._dark:
             bg      = "#1a1a1c"
             border  = "rgba(255,255,255,0.06)"
-            text_c  = "#111111"
+            text_c  = "#ececec"
             btn_h   = "rgba(255,255,255,0.09)"
-            close_h = "#c42b1c"
-            close_t = "#ffffff"
         else:
             bg      = "#ececec"
             border  = "rgba(0,0,0,0.10)"
-            text_c  = "#ffffff"
+            text_c  = "#111111"
             btn_h   = "rgba(0,0,0,0.08)"
-            close_h = "#c42b1c"
-            close_t = "#ffffff"
 
-        self._title_bar_widget.setStyleSheet(f"""
+        # Base title bar + shared label/hamburger styles (same for all platforms)
+        base_qss = f"""
 QWidget#titleBar {{
     background: {bg};
     border-bottom: 1px solid {border};
@@ -179,6 +197,12 @@ QPushButton#hamburgerBtn:hover {{
 QPushButton#hamburgerBtn:pressed {{
     background: {btn_h};
 }}
+"""
+        # Windows / Linux: standard wide buttons with hover highlight
+        close_h = "#c42b1c"
+        close_t = "#ffffff"
+
+        win_qss = f"""
 QPushButton#titleBarMin, QPushButton#titleBarMax {{
     background: transparent;
     color: {text_c};
@@ -206,7 +230,8 @@ QPushButton#titleBarClose:pressed {{
     background: {close_h};
     opacity: 0.85;
 }}
-""")
+"""
+        self._title_bar_widget.setStyleSheet(base_qss + win_qss)
 
     def _default_logo_path(self) -> str | None:
         """Return the best available default logo path — PNG preferred over SVG."""
